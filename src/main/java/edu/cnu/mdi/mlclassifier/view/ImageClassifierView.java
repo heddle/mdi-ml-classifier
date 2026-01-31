@@ -39,7 +39,8 @@ public class ImageClassifierView extends BaseView {
               PropertyUtils.VISIBLE, true);
 
         buildUI();
-        installDnD();
+        installFileDrop(imagePanel);
+  //      installDnD();
     }
 
     private void buildUI() {
@@ -101,6 +102,7 @@ public class ImageClassifierView extends BaseView {
         imagePanel.setImage(img);
 
         if (sourcePath != null) {
+        	System.out.println("Loaded image from: " + sourcePath.toString());
             hintLabel.setText(sourcePath.getFileName().toString());
         } else {
             hintLabel.setText("Image loaded");
@@ -109,6 +111,47 @@ public class ImageClassifierView extends BaseView {
         // Future seam:
         // triggerInferenceAsync(img);
         // or notify listeners: imageLoaded(img, sourcePath);
+    }
+    
+    private void installFileDrop(JComponent target) {
+        target.setTransferHandler(new TransferHandler() {
+
+            @Override
+            public boolean canImport(TransferSupport support) {
+                if (!support.isDrop()) return false;
+                return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public boolean importData(TransferSupport support) {
+                if (!canImport(support)) return false;
+
+                try {
+                    List<File> files = (List<File>) support.getTransferable()
+                            .getTransferData(DataFlavor.javaFileListFlavor);
+
+                    if (files == null || files.isEmpty()) return false;
+
+                    File f = files.get(0);
+
+                    // Try to read as an image. If it fails, ImageIO returns null.
+                    BufferedImage img = ImageIO.read(f);
+                    if (img == null) {
+                        // not an image (or unsupported format)
+                        return false;
+                    }
+
+                    // YOUR hook:
+                    setImage(img, f.toPath());
+                    return true;
+
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    return false;
+                }
+            }
+        });
     }
 
     // ----------------------------------------------------------------
