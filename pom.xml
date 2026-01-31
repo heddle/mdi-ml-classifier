@@ -1,0 +1,30 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>edu.cnu</groupId>
+	<artifactId>mdi-ml-classifier</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>MDI Classifier</name>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<maven.compiler.source>17</maven.compiler.source>
+		<maven.compiler.target>17</maven.compiler.target>
+
+		<!-- Centralized JUnit version -->
+		<junit.version>5.10.2</junit.version>
+
+		<!-- Version of the Maven Surefire plugin used for running tests -->
+		<maven.surefire.plugin.version>3.3.0</maven.surefire.plugin.version>
+	</properties>
+
+
+	<dependencies>
+		<dependency>
+			<groupId>edu.cnu</groupId>
+			<artifactId>mdi</artifactId>
+			<version>0.1.0-SNAPSHOT</version>
+		</dependency>
+	</dependencies>
+</project>
