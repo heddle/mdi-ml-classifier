@@ -21,10 +21,18 @@
 
 
 	<dependencies>
+		<!-- MDI -->
 		<dependency>
 			<groupId>edu.cnu</groupId>
 			<artifactId>mdi</artifactId>
 			<version>0.1.0-SNAPSHOT</version>
 		</dependency>
+		<dependency>
+		<!-- ONNX Runtime -->
+			<groupId>com.microsoft.onnxruntime</groupId>
+			<artifactId>onnxruntime</artifactId>
+			<version>1.23.2</version>
+		</dependency>
+
 	</dependencies>
 </project>
