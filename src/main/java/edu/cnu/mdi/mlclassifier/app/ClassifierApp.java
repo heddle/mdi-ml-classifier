@@ -48,8 +48,17 @@ public class ClassifierApp extends BaseMDIApplication {
 		plotView = new PlotView(PropertyUtils.TITLE, "Classification Results", PropertyUtils.FRACTION, 0.7,
 				PropertyUtils.ASPECT, 1.2, PropertyUtils.VISIBLE, true);
 
-		Path modelPath = Path.of("/Users/davidheddle/mdi-ml-classifier/models/resnet50-v2-7.onnx");
-		Path labelsPath = Path.of("/Users/davidheddle/mdi-ml-classifier/models/imagenet_labels.txt");
+		String homeDir = System.getProperty("user.home");
+
+		Path homePath = Path.of(homeDir);
+
+		// Build the path relative to home
+		Path modelPath = homePath.resolve("mdi-ml-classifier/models/resnet50-v2-7.onnx");
+		Path labelsPath = homePath.resolve("mdi-ml-classifier/models/imagenet_labels.txt");
+		
+		
+//		Path modelPath = Path.of("/Users/davidheddle/mdi-ml-classifier/models/resnet50-v2-7.onnx");
+//		Path labelsPath = Path.of("/Users/davidheddle/mdi-ml-classifier/models/imagenet_labels.txt");
 
 		try {
 			OnnxImageClassifier classifier = new OnnxImageClassifier(modelPath, labelsPath);
