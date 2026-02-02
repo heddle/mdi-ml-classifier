@@ -6,7 +6,9 @@ import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.splot.pdata.PlotDataException;
 import edu.cnu.mdi.splot.plot.BarPlot;
+import edu.cnu.mdi.splot.plot.PlotCanvas;
 import edu.cnu.mdi.splot.plot.PlotPanel;
+import edu.cnu.mdi.splot.plot.RenderHint;
 
 public class PlotSupport {
 
@@ -40,6 +42,5 @@ public class PlotSupport {
 			Log.getInstance().warning("Error creating plot: " + e.getMessage());
 		}
 		return plotPanel;
-
 	}
 }

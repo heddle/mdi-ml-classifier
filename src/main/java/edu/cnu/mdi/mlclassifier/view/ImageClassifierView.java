@@ -1,14 +1,18 @@
 package edu.cnu.mdi.mlclassifier.view;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.geom.Point2D.Double;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
@@ -16,10 +20,14 @@ import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 
+import edu.cnu.mdi.container.BaseContainer;
+import edu.cnu.mdi.container.IContainer;
+import edu.cnu.mdi.feedback.FeedbackPane;
+import edu.cnu.mdi.graphics.drawable.IDrawable;
 import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
@@ -32,15 +40,28 @@ import edu.cnu.mdi.view.BaseView;
 @SuppressWarnings("serial")
 public class ImageClassifierView extends BaseView {
 
-	private final ImagePanel imagePanel = new ImagePanel();
+	// default side panel width (feedback)
+	private static final int SIDE_PANEL_WIDTH = 220;
+
+	// status label
 	private final JLabel statusLabel = new JLabel("Drop an image here (or use File → Open)", SwingConstants.CENTER);
 
 	private OnnxImageClassifier onnx; // model runner
 	private boolean onnxReady = false;
+	
+	// current image
+	private BufferedImage currentImage;
 
 	// Optional: remember source for later (model metadata, etc.)
 	private Path currentImagePath;
-
+	
+	// Current classification results
+	private List<ClassScore> currentResults;
+	
+	// Rectangle where the image is drawn
+	private Rectangle imageRect;
+	
+	// Consumer for classification results
 	private Consumer<List<ClassScore>> classificationResultConsumer;
 
 	public ImageClassifierView(OnnxImageClassifier classifier, Object... keyVals) {
@@ -49,15 +70,48 @@ public class ImageClassifierView extends BaseView {
 
 		onnx = classifier;
 		onnxReady = true;
-		setStatusText("Model loaded. Drop an image to classify.");
-		// only allow valid image files to be dropped
 		setFileFilter(ImageFilters.isActualImage);
-		buildUI();
+		addStatusLabel();
+		addFeedback();
 
 		// Set up drag and drop handling
 
-		imagePanel.setTransferHandler(new FileDropHandler(this));
+		JComponent jc = (JComponent) getContainer().getComponent();
+		jc.setTransferHandler(new FileDropHandler(this));
 
+		getContainer().getFeedbackControl().addFeedbackProvider(this);
+
+		IDrawable imageDrawer = new IDrawable() {
+
+			@Override
+			public void draw(Graphics2D g2, IContainer container) {
+				drawImage(g2, container, currentImage);
+			}
+		};
+		
+		getContainer().setBeforeDraw(imageDrawer);
+
+	}
+	
+	// Add the status label below the image panel.
+	private void addStatusLabel() {
+		statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+		statusLabel.setFont(Fonts.defaultFont);
+		statusLabel.setText("Model loaded. Drop an image above to classify.");
+		statusLabel.setOpaque(true);
+		statusLabel.setBackground(Color.lightGray);
+		statusLabel.setForeground(Color.black);
+		statusLabel.setBorder(BorderFactory.createLineBorder(Color.darkGray));
+		add(statusLabel, BorderLayout.SOUTH);
+	}
+	
+	// Add the feedback pane to the east side.
+	private void addFeedback() {
+		FeedbackPane fbp = initFeedback();
+		Dimension feedbackPref = fbp.getPreferredSize();
+		fbp.setPreferredSize(new Dimension(SIDE_PANEL_WIDTH, feedbackPref.height));
+		add(fbp, BorderLayout.EAST);
+		statusLabel.setBorder(BorderFactory.createLineBorder(Color.lightGray));
 	}
 
 	/**
@@ -69,23 +123,6 @@ public class ImageClassifierView extends BaseView {
 		classificationResultConsumer = consumer;
 	}
 
-	// Build the user interface.
-	private void buildUI() {
-		// If BaseView is a JInternalFrame-like container:
-		setLayout(new BorderLayout());
-
-		statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-		statusLabel.setFont(Fonts.defaultFont);
-
-		JPanel center = new JPanel(new BorderLayout());
-		center.add(imagePanel, BorderLayout.CENTER);
-		center.add(statusLabel, BorderLayout.SOUTH);
-
-		add(center, BorderLayout.CENTER);
-
-		// Give the view a sane minimum
-		setMinimumSize(new Dimension(400, 300));
-	}
 
 	/**
 	 * Set the image to display in this view and to be classified
@@ -96,7 +133,7 @@ public class ImageClassifierView extends BaseView {
 	public void setImage(BufferedImage img, Path sourcePath) {
 		Objects.requireNonNull(img, "img");
 		this.currentImagePath = sourcePath;
-		imagePanel.setImage(img);
+		currentImage = img;
 
 		if (sourcePath != null) {
 			setStatusText("Loaded image from " + sourcePath.getFileName().toString());
@@ -118,6 +155,7 @@ public class ImageClassifierView extends BaseView {
 					}
 
 					setStatusText("Classification complete.");
+					currentResults = results;
 					if (classificationResultConsumer != null) {
 						classificationResultConsumer.accept(results);
 					}
@@ -126,6 +164,7 @@ public class ImageClassifierView extends BaseView {
 		} else {
 			runFakeInferenceAsync(img);
 		}
+		getContainer().refresh();
 	}
 
 	// Simulate an asynchronous inference process with fake results.
@@ -171,6 +210,7 @@ public class ImageClassifierView extends BaseView {
 	@Override
 	public void filesDropped(List<File> files) {
 		if (files == null || files.isEmpty()) {
+			currentImagePath = null;
 			return;
 		}
 		File file = files.get(0);
@@ -180,63 +220,110 @@ public class ImageClassifierView extends BaseView {
 				Log.getInstance().warning("The dropped file is not a valid image: " + file.getAbsolutePath());
 				return;
 			}
+			currentImagePath = file.toPath();
 			setImage(img, file.toPath());
 			Log.getInstance().info("Loaded image file: " + file.getAbsolutePath());
 		} catch (IOException e) {
+			currentImagePath = null;
 			Log.getInstance().warning("Error reading image file [" + file.getAbsolutePath() + "]: " + e.getMessage());
 		}
 	}
-
-	// ----------------------------------------------------------------
-	// Inner panel that paints the image scaled-to-fit.
-	// ----------------------------------------------------------------
-	private static final class ImagePanel extends JPanel {
-		private BufferedImage image;
-
-		ImagePanel() {
-			setOpaque(true);
+	
+	// Draw the image centered and scaled to fit within the container.
+	private void drawImage(Graphics2D g2, IContainer ctr, BufferedImage image) {
+		if (image == null) {
+			imageRect = null;
+			return;
 		}
+	    Objects.requireNonNull(container, "container");
+        
+        BaseContainer container = (BaseContainer) ctr;
+        
+        Rectangle bounds = container.getBounds();
+	    int w = bounds.width;
+	    int h = bounds.height;
+	    int iw = image.getWidth();
+	    int ih = image.getHeight();
+	    
+		g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+		g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+	    
+		double sx = (double) w / iw;
+		double sy = (double) h / ih;
+		double s = Math.min(sx, sy);
 
-		void setImage(BufferedImage img) {
-			this.image = img;
-			repaint();
-		}
+		int dw = (int) Math.round(iw * s);
+		int dh = (int) Math.round(ih * s);
 
-		@Override
-		protected void paintComponent(Graphics g) {
-			super.paintComponent(g);
+		int x = (w - dw) / 2;
+		int y = (h - dh) / 2;
 
-			Graphics2D g2 = (Graphics2D) g.create();
-			try {
-				g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-				g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g2.drawImage(image, x, y, dw, dh, null);
+		imageRect = new Rectangle(x, y, dw, dh);
+		
+	}
+	
+	// Provide feedback strings showing screen and world coordinates
+	// items will ad to the feedback when they are mouse-overed
+	@Override
+	public void getFeedbackStrings(IContainer container, Point pp, Double wp, List<String> feedbackStrings) {
+		feedbackStrings.add(String.format("Screen Coordinates: (%d, %d)", pp.x, pp.y));
 
-				if (image == null) {
-					// Optional: draw a subtle placeholder
-					return;
+		if (imageRect != null && currentImage != null) {
+			boolean inside = imageRect.contains(pp);
+			String inImageStr = imageRect.contains(pp) ? "(inside image)" : "(outside image)";
+			feedbackStrings.add(inImageStr);
+
+			if (inside) {
+				if (currentImagePath != null) {
+					feedbackStrings.add("Source: " + currentImagePath.getFileName().toString());
 				}
+				int imgX = pp.x - imageRect.x;
+				int imgY = pp.y - imageRect.y;
+				String coordStrImg = String.format("Pixel: (%d, %d) %s", imgX, imgY, inImageStr);
+				feedbackStrings.add(coordStrImg);
 
-				int w = getWidth();
-				int h = getHeight();
-
-				int iw = image.getWidth();
-				int ih = image.getHeight();
-
-				double sx = (double) w / iw;
-				double sy = (double) h / ih;
-				double s = Math.min(sx, sy);
-
-				int dw = (int) Math.round(iw * s);
-				int dh = (int) Math.round(ih * s);
-
-				int x = (w - dw) / 2;
-				int y = (h - dh) / 2;
-
-				g2.drawImage(image, x, y, dw, dh, null);
-			} finally {
-				g2.dispose();
+				int clr = currentImage.getRGB(
+						(int) Math.round((double) imgX * currentImage.getWidth() / imageRect.width),
+						(int) Math.round((double) imgY * currentImage.getHeight() / imageRect.height));
+				Color color = new Color(clr, true);
+				feedbackStrings
+						.add("Red: " + color.getRed() + " Green: " + color.getGreen() + " Blue: " + color.getBlue());
+				
+				
+				if (currentResults != null && !currentResults.isEmpty()) {
+					int maxClassesToShow = Math.min(5, currentResults.size());
+					feedbackStrings.add("$yellow$Top " + maxClassesToShow + " Classifications:");
+					for (int i = 0; i < maxClassesToShow; i++) {
+						ClassScore cs = currentResults.get(i);
+						feedbackStrings.add(String.format("$yellow$  %s: %.4f%%", cs.label(), cs.score() * 100));
+					}
+					
+					// top max of 3 cumulative probability
+					
+					double cumulativeProb = 0.0;
+					int count = 0;
+					feedbackStrings.add("$orange$Cumulative Probability:");
+					for (ClassScore cs : currentResults) {
+						cumulativeProb += cs.score();
+						count++;
+						feedbackStrings.add(String.format("$orange$  Top-%d %.4f%%", count,
+								cumulativeProb * 100));
+						if (count >= 3) {
+							break;
+						}
+						
+					}
+					
+					ArrayList<String> inferenceOutput = onnx.getInferenceOutput();
+					for (String line : inferenceOutput) {
+						feedbackStrings.add("$white$" + line);
+					}
+				}
 			}
 		}
+
 	}
+
 }

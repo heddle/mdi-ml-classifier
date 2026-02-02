@@ -7,17 +7,15 @@ import java.util.List;
 
 import ai.onnxruntime.OrtException;
 import edu.cnu.mdi.app.BaseMDIApplication;
-import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
 import edu.cnu.mdi.mlclassifier.view.ImageClassifierView;
 import edu.cnu.mdi.mlclassifier.view.PlotSupport;
 import edu.cnu.mdi.properties.PropertyUtils;
-import edu.cnu.mdi.splot.pdata.PlotDataException;
-import edu.cnu.mdi.splot.plot.BarPlot;
 import edu.cnu.mdi.splot.plot.PlotPanel;
 import edu.cnu.mdi.splot.plot.PlotView;
 import edu.cnu.mdi.view.LogView;
+import edu.cnu.mdi.view.ViewManager;
 
 @SuppressWarnings("serial")
 public class ClassifierApp extends BaseMDIApplication {
@@ -43,31 +41,22 @@ public class ClassifierApp extends BaseMDIApplication {
 	 */
 	private void addInitialViews() {
 		LogView logView = new LogView();
+		ViewManager.getInstance().getViewMenu().addSeparator();
 		logView.setVisible(false);
 
 		plotView = new PlotView(PropertyUtils.TITLE, "Classification Results", PropertyUtils.FRACTION, 0.7,
 				PropertyUtils.ASPECT, 1.2, PropertyUtils.VISIBLE, true);
 
-		String homeDir = System.getProperty("user.home");
-
-		Path homePath = Path.of(homeDir);
-
-		// Build the path relative to home
-		Path modelPath = homePath.resolve("mdi-ml-classifier/models/resnet50-v2-7.onnx");
-		Path labelsPath = homePath.resolve("mdi-ml-classifier/models/imagenet_labels.txt");
-		
-		
-//		Path modelPath = Path.of("/Users/davidheddle/mdi-ml-classifier/models/resnet50-v2-7.onnx");
-//		Path labelsPath = Path.of("/Users/davidheddle/mdi-ml-classifier/models/imagenet_labels.txt");
+		Path wd = Path.of(System.getProperty("user.dir"));
+		Path modelPath  = wd.resolve("models/resnet50-v2-7.onnx");
+		Path labelsPath = wd.resolve("models/imagenet_labels.txt");
 
 		try {
-			OnnxImageClassifier classifier = new OnnxImageClassifier(modelPath, labelsPath);
-			ImageClassifierView imageView = new ImageClassifierView(classifier);
-			imageView.setResultConsumer(results -> makeBarPlot(results));
-		} catch (OrtException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
+		    OnnxImageClassifier classifier = new OnnxImageClassifier(modelPath, labelsPath);
+		    ImageClassifierView imageView = new ImageClassifierView(classifier);
+		    imageView.setResultConsumer(results -> makeBarPlot(results));
+		} catch (OrtException | IOException e) {
+		    e.printStackTrace();
 		}
 
 
@@ -77,7 +66,7 @@ public class ClassifierApp extends BaseMDIApplication {
     private void makeBarPlot(List<ClassScore> results) {
     	PlotPanel plotPanel = PlotSupport.createBarPlot(results);
     	if (plotPanel != null) {
-    		plotView.setPlotPanel(plotPanel);
+    		plotView.switchToPlotPanel(plotPanel);
     	}
     }
 
