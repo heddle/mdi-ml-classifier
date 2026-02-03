@@ -122,6 +122,7 @@ public final class OnnxImageClassifier implements Closeable {
     
     //used for feedback
     private ArrayList<String> inferenceOutput = new ArrayList<String>();
+    private ArrayList<String> modelMetaData = new ArrayList<String>();
 
     /**
      * Create a classifier with a model only (no labels). Class names will be "class_i".
@@ -157,7 +158,7 @@ public final class OnnxImageClassifier implements Closeable {
         
         //check the normalization type based on model name
         if (modelPath.toString().toLowerCase().contains("efficientnet")) {
-            this.normType = NormType.SCALE_NEG1_1; // Common for ONNX-converted Lite models
+            this.normType = NormType.SCALE_0_1; // Common for ONNX-converted Lite models
         }
 
         // Create session
@@ -169,6 +170,15 @@ public final class OnnxImageClassifier implements Closeable {
         this.nchw = spec.nchw;
         this.inputW = spec.width;
         this.inputH = spec.height;
+        
+        // Store model meta data for feedback
+        modelMetaData.add("ONNX model: " + modelPath.getFileName());
+        modelMetaData.add("input name: " + inputName);
+        modelMetaData.add(String.format("mean = [%.3f, %.3f, %.3f]", mean[0], mean[1], mean[2]));
+        modelMetaData.add(String.format("std  = [%.3f, %.3f, %.3f]", std[0], std[1], std[2]));
+        modelMetaData.add("input layout: " + (nchw ? "NCHW" : "NHWC"));
+        modelMetaData.add("input size: " + inputW + " x " + inputH);
+       
 
         // Choose output
         String out = null;
@@ -188,14 +198,22 @@ public final class OnnxImageClassifier implements Closeable {
         });
 
         // Helpful diagnostics
-        session.getInputInfo().forEach((k, v) ->
-                Log.getInstance().info("ONNX input: " + k + " -> " + v.getInfo()));
+        session.getInputInfo().forEach((k, v) -> {
+            Log.getInstance().info("ONNX input key: " + k);
+            Log.getInstance().info("ONNX input value: " + v.getInfo());
+         });
+        
+        
         session.getOutputInfo().forEach((k, v) ->
                 Log.getInstance().info("ONNX output: " + k + " -> " + v.getInfo()));
         Log.getInstance().info("ONNX model loaded. input=" + inputName
                 + " output=" + outputName
                 + " layout=" + (nchw ? "NCHW" : "NHWC")
                 + " size=" + inputW + "x" + inputH);
+        
+		for (String s : modelMetaData) {
+			Log.getInstance().info(s);
+		}
     }
 
     /**
@@ -264,7 +282,7 @@ public final class OnnxImageClassifier implements Closeable {
                 	max = Math.max(max, v); 
                 }
                 
-                inferenceOutput.add("ONNX inference: ");
+                inferenceOutput.add("ONNX Inference: ");
                 inferenceOutput.add("  time: " + dtMs + " ms");
                 
                 String logitsRange = String.format("  logits range: [%.4f, %.4f]", min, max);
@@ -280,12 +298,14 @@ public final class OnnxImageClassifier implements Closeable {
 					sum += p;
 					pMax = Math.max(pMax, p);
 				}
-				inferenceOutput.add("  probability sum: " + sum);
-				inferenceOutput.add("  confidence (max): " + pMax);
+				inferenceOutput.add(String.format("  probability sum: %7f", sum));
+				inferenceOutput.add(String.format("  confidence (top-1 probability): %4f", pMax));
 				
 				double ent = entropyBits(probs);
-				inferenceOutput.add("  Uncertainty (entropy): " + String.format("%.4f bits", ent));
-				
+				inferenceOutput.add("  uncertainty (entropy): " + String.format("%.3f bits", ent));
+				double maxEnt = Math.log(probs.length) / Math.log(2.0); // log2(N)
+				double nEnt = (ent / maxEnt) * 100.0; // normalized entropy in %
+				inferenceOutput.add("  uncertainty (normalized): " + String.format("%.2f%%", nEnt));
 				for(String s : inferenceOutput) {
 					Log.getInstance().info(s);
 				}
@@ -301,6 +321,15 @@ public final class OnnxImageClassifier implements Closeable {
      */
     public ArrayList<String> getInferenceOutput(){
 		return inferenceOutput;
+	}
+    
+    /**
+	 * Get model meta data for feedback
+	 * 
+	 * @return model meta data as ArrayList<String>
+	 */
+	public ArrayList<String> getModelMetaData() {
+		return modelMetaData;
 	}
 
     /**
@@ -511,72 +540,7 @@ public final class OnnxImageClassifier implements Closeable {
         }
     }
 
-    /**
-     * Preprocess image into float array matching model layout.
-     * <p>
-     * Resizes to the inferred inputW/inputH, converts to RGB float in [0,1],
-     * then applies ImageNet mean/std normalization.
-     *
-     * @param src source image
-     * @return float array in CHW (NCHW) or HWC (NHWC) order (batch dimension not included)
-     */
-    private float[] Xpreprocess(BufferedImage src) {
-        BufferedImage resized = new BufferedImage(inputW, inputH, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = resized.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g.drawImage(src, 0, 0, inputW, inputH, null);
-        } finally {
-            g.dispose();
-        }
-
-        if (nchw) {
-            // [3, H, W] contiguous channels
-            float[] out = new float[3 * inputW * inputH];
-            int plane = inputW * inputH;
-
-            int idxR = 0;
-            int idxG = plane;
-            int idxB = 2 * plane;
-
-            for (int y = 0; y < inputH; y++) {
-                for (int x = 0; x < inputW; x++) {
-                    int rgb = resized.getRGB(x, y);
-                    int r = (rgb >> 16) & 0xFF;
-                    int gg = (rgb >> 8) & 0xFF;
-                    int b = (rgb) & 0xFF;
-
-                    float rf = (r / 255.0f - mean[0]) / std[0];
-                    float gf = (gg / 255.0f - mean[1]) / std[1];
-                    float bf = (b / 255.0f - mean[2]) / std[2];
-
-                    int p = y * inputW + x;
-                    out[idxR + p] = rf;
-                    out[idxG + p] = gf;
-                    out[idxB + p] = bf;
-                }
-            }
-            return out;
-        } else {
-            // NHWC: [H, W, 3] interleaved per pixel
-            float[] out = new float[inputW * inputH * 3];
-            int i = 0;
-            for (int y = 0; y < inputH; y++) {
-                for (int x = 0; x < inputW; x++) {
-                    int rgb = resized.getRGB(x, y);
-                    int r = (rgb >> 16) & 0xFF;
-                    int gg = (rgb >> 8) & 0xFF;
-                    int b = (rgb) & 0xFF;
-
-                    out[i++] = (r / 255.0f - mean[0]) / std[0];
-                    out[i++] = (gg / 255.0f - mean[1]) / std[1];
-                    out[i++] = (b / 255.0f - mean[2]) / std[2];
-                }
-            }
-            return out;
-        }
-    }
-
+ 
     private List<ClassScore> topK(float[] probs, int k) {
         List<Map.Entry<Integer, Float>> idx = new ArrayList<>(probs.length);
         for (int i = 0; i < probs.length; i++) {

@@ -41,7 +41,7 @@ import edu.cnu.mdi.view.BaseView;
 public class ImageClassifierView extends BaseView {
 
 	// default side panel width (feedback)
-	private static final int SIDE_PANEL_WIDTH = 220;
+	private static final int SIDE_PANEL_WIDTH = 230;
 
 	// status label
 	private final JLabel statusLabel = new JLabel("Drop an image here (or use File → Open)", SwingConstants.CENTER);
@@ -294,6 +294,7 @@ public class ImageClassifierView extends BaseView {
 				
 				if (currentResults != null && !currentResults.isEmpty()) {
 					int maxClassesToShow = Math.min(5, currentResults.size());
+					feedbackStrings.add(" "); // empty line
 					feedbackStrings.add("$yellow$Top " + maxClassesToShow + " Classifications:");
 					for (int i = 0; i < maxClassesToShow; i++) {
 						ClassScore cs = currentResults.get(i);
@@ -304,6 +305,7 @@ public class ImageClassifierView extends BaseView {
 					
 					double cumulativeProb = 0.0;
 					int count = 0;
+					feedbackStrings.add(" "); // empty line
 					feedbackStrings.add("$orange$Cumulative Probability:");
 					for (ClassScore cs : currentResults) {
 						cumulativeProb += cs.score();
@@ -316,6 +318,16 @@ public class ImageClassifierView extends BaseView {
 						
 					}
 					
+					feedbackStrings.add(" "); // empty line
+					ArrayList<String> metaData = onnx.getModelMetaData();
+					if (metaData != null && !metaData.isEmpty()) {
+						feedbackStrings.add("$light green$Model Metadata:");
+						for (String line : metaData) {
+							feedbackStrings.add("$light green$  " + line);
+						}
+					}
+
+					feedbackStrings.add(" "); // empty line
 					ArrayList<String> inferenceOutput = onnx.getInferenceOutput();
 					for (String line : inferenceOutput) {
 						feedbackStrings.add("$white$" + line);
