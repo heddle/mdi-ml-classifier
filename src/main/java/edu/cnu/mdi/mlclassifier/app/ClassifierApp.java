@@ -48,7 +48,10 @@ public class ClassifierApp extends BaseMDIApplication {
 				PropertyUtils.ASPECT, 1.2, PropertyUtils.VISIBLE, true);
 
 		Path wd = Path.of(System.getProperty("user.dir"));
-		Path modelPath  = wd.resolve("models/resnet50-v2-7.onnx");
+		
+		String resNetModel = "models/resnet50-v2-7.onnx";
+		String efficientNetModel = "models/efficientnet-lite4-11-int8.onnx";
+		Path modelPath  = wd.resolve(resNetModel);
 		Path labelsPath = wd.resolve("models/imagenet_labels.txt");
 
 		try {

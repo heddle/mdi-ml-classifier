@@ -67,6 +67,10 @@ import edu.cnu.mdi.mlclassifier.model.ClassScore;
  * when done (e.g., app shutdown) to release native resources.
  */
 public final class OnnxImageClassifier implements Closeable {
+	
+	// Normalization types for different models
+	public enum NormType { RESNET, SCALE_0_1, SCALE_NEG1_1 }
+
 
     /**
      * Simple descriptor of the model's image input.
@@ -107,6 +111,10 @@ public final class OnnxImageClassifier implements Closeable {
 
     private final List<String> labels; // may be null
     private final ExecutorService exec;
+    
+    // Norm type for preprocessing default
+    private NormType normType = NormType.RESNET; 
+
 
     // ImageNet defaults (common). Adjust if your model expects different preprocessing.
     private final float[] mean = {0.485f, 0.456f, 0.406f};
@@ -146,6 +154,11 @@ public final class OnnxImageClassifier implements Closeable {
      */
     public OnnxImageClassifier(Path modelPath, List<String> labels) throws OrtException {
         Objects.requireNonNull(modelPath, "modelPath");
+        
+        //check the normalization type based on model name
+        if (modelPath.toString().toLowerCase().contains("efficientnet")) {
+            this.normType = NormType.SCALE_NEG1_1; // Common for ONNX-converted Lite models
+        }
 
         // Create session
         this.session = ENV.createSession(modelPath.toString(), new OrtSession.SessionOptions());
@@ -417,6 +430,87 @@ public final class OnnxImageClassifier implements Closeable {
         return (int) dim;
     }
 
+    private float[] preprocess(BufferedImage src) {
+        // 1. Resize image to model specs
+        BufferedImage resized = new BufferedImage(inputW, inputH, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = resized.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(src, 0, 0, inputW, inputH, null);
+        } finally {
+            g.dispose();
+        }
+
+        int totalPixels = inputW * inputH;
+        float[] out = new float[3 * totalPixels];
+
+        if (nchw) {
+            // [C, H, W] layout (Planar)
+            int idxG = totalPixels;
+            int idxB = 2 * totalPixels;
+
+            for (int y = 0; y < inputH; y++) {
+                for (int x = 0; x < inputW; x++) {
+                    int rgb = resized.getRGB(x, y);
+                    float rf = ((rgb >> 16) & 0xFF);
+                    float gf = ((rgb >> 8) & 0xFF);
+                    float bf = (rgb & 0xFF);
+
+                    float[] normalized = applyNormalization(rf, gf, bf);
+
+                    int p = y * inputW + x;
+                    out[p] = normalized[0];        // R plane
+                    out[idxG + p] = normalized[1]; // G plane
+                    out[idxB + p] = normalized[2]; // B plane
+                }
+            }
+        } else {
+            // [H, W, C] layout (Interleaved)
+            int i = 0;
+            for (int y = 0; y < inputH; y++) {
+                for (int x = 0; x < inputW; x++) {
+                    int rgb = resized.getRGB(x, y);
+                    float rf = ((rgb >> 16) & 0xFF);
+                    float gf = ((rgb >> 8) & 0xFF);
+                    float bf = (rgb & 0xFF);
+
+                    float[] normalized = applyNormalization(rf, gf, bf);
+
+                    out[i++] = normalized[0];
+                    out[i++] = normalized[1];
+                    out[i++] = normalized[2];
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Helper to centralize the math for different model requirements.
+     */
+    private float[] applyNormalization(float r, float g, float b) {
+        switch (normType) {
+            case RESNET:
+                // Standard ImageNet Mean/Std subtraction
+                return new float[] {
+                    (r / 255.0f - mean[0]) / std[0],
+                    (g / 255.0f - mean[1]) / std[1],
+                    (b / 255.0f - mean[2]) / std[2]
+                };
+            case SCALE_NEG1_1:
+                // Maps 0-255 to -1.0 to 1.0 (Common for TF exports)
+                return new float[] {
+                    (r - 127.5f) / 127.5f,
+                    (g - 127.5f) / 127.5f,
+                    (b - 127.5f) / 127.5f
+                };
+            case SCALE_0_1:
+            default:
+                // Simple 0.0 to 1.0 scaling (Common for ONNX Zoo Lite models)
+                return new float[] { r / 255.0f, g / 255.0f, b / 255.0f };
+        }
+    }
+
     /**
      * Preprocess image into float array matching model layout.
      * <p>
@@ -426,7 +520,7 @@ public final class OnnxImageClassifier implements Closeable {
      * @param src source image
      * @return float array in CHW (NCHW) or HWC (NHWC) order (batch dimension not included)
      */
-    private float[] preprocess(BufferedImage src) {
+    private float[] Xpreprocess(BufferedImage src) {
         BufferedImage resized = new BufferedImage(inputW, inputH, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = resized.createGraphics();
         try {
