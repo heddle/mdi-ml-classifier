@@ -67,7 +67,7 @@ import edu.cnu.mdi.mlclassifier.model.ClassScore;
  * when done (e.g., app shutdown) to release native resources.
  */
 public final class OnnxImageClassifier implements Closeable {
-	
+
 	// Normalization types for different models
 	public enum NormType { RESNET, SCALE_0_1, SCALE_NEG1_1 }
 
@@ -111,18 +111,18 @@ public final class OnnxImageClassifier implements Closeable {
 
     private final List<String> labels; // may be null
     private final ExecutorService exec;
-    
+
     // Norm type for preprocessing default
-    private NormType normType = NormType.RESNET; 
+    private NormType normType = NormType.RESNET;
 
 
     // ImageNet defaults (common). Adjust if your model expects different preprocessing.
     private final float[] mean = {0.485f, 0.456f, 0.406f};
     private final float[] std  = {0.229f, 0.224f, 0.225f};
-    
+
     //used for feedback
-    private ArrayList<String> inferenceOutput = new ArrayList<String>();
-    private ArrayList<String> modelMetaData = new ArrayList<String>();
+    private ArrayList<String> inferenceOutput = new ArrayList<>();
+    private ArrayList<String> modelMetaData = new ArrayList<>();
 
     /**
      * Create a classifier with a model only (no labels). Class names will be "class_i".
@@ -155,7 +155,7 @@ public final class OnnxImageClassifier implements Closeable {
      */
     public OnnxImageClassifier(Path modelPath, List<String> labels) throws OrtException {
         Objects.requireNonNull(modelPath, "modelPath");
-        
+
         //check the normalization type based on model name
         if (modelPath.toString().toLowerCase().contains("efficientnet")) {
             this.normType = NormType.SCALE_0_1; // Common for ONNX-converted Lite models
@@ -170,7 +170,7 @@ public final class OnnxImageClassifier implements Closeable {
         this.nchw = spec.nchw;
         this.inputW = spec.width;
         this.inputH = spec.height;
-        
+
         // Store model meta data for feedback
         modelMetaData.add("ONNX model: " + modelPath.getFileName());
         modelMetaData.add("input name: " + inputName);
@@ -178,7 +178,7 @@ public final class OnnxImageClassifier implements Closeable {
         modelMetaData.add(String.format("std  = [%.3f, %.3f, %.3f]", std[0], std[1], std[2]));
         modelMetaData.add("input layout: " + (nchw ? "NCHW" : "NHWC"));
         modelMetaData.add("input size: " + inputW + " x " + inputH);
-       
+
 
         // Choose output
         String out = null;
@@ -202,15 +202,15 @@ public final class OnnxImageClassifier implements Closeable {
             Log.getInstance().info("ONNX input key: " + k);
             Log.getInstance().info("ONNX input value: " + v.getInfo());
          });
-        
-        
+
+
         session.getOutputInfo().forEach((k, v) ->
                 Log.getInstance().info("ONNX output: " + k + " -> " + v.getInfo()));
         Log.getInstance().info("ONNX model loaded. input=" + inputName
                 + " output=" + outputName
                 + " layout=" + (nchw ? "NCHW" : "NHWC")
                 + " size=" + inputW + "x" + inputH);
-        
+
 		for (String s : modelMetaData) {
 			Log.getInstance().info(s);
 		}
@@ -246,7 +246,7 @@ public final class OnnxImageClassifier implements Closeable {
     public List<ClassScore> classify(BufferedImage image, int topK) throws OrtException {
         Objects.requireNonNull(image, "image");
         inferenceOutput.clear();
-        
+
         int k = Math.max(1, topK);
 
         float[] input = preprocess(image);
@@ -277,18 +277,18 @@ public final class OnnxImageClassifier implements Closeable {
                 // Debug-friendly sanity checks (safe to keep, or gate behind a flag)
                 float min = Float.POSITIVE_INFINITY;
                 float max = Float.NEGATIVE_INFINITY;
-                for (float v : logits) { 
-                	min = Math.min(min, v); 
-                	max = Math.max(max, v); 
+                for (float v : logits) {
+                	min = Math.min(min, v);
+                	max = Math.max(max, v);
                 }
-                
+
                 inferenceOutput.add("ONNX Inference: ");
                 inferenceOutput.add("  time: " + dtMs + " ms");
-                
+
                 String logitsRange = String.format("  logits range: [%.4f, %.4f]", min, max);
                 inferenceOutput.add(logitsRange);
-                               
- 
+
+
                 float[] probs = softmax(logits);
 
                 // Optional check: sum should be ~1.0
@@ -300,7 +300,7 @@ public final class OnnxImageClassifier implements Closeable {
 				}
 				inferenceOutput.add(String.format("  probability sum: %7f", sum));
 				inferenceOutput.add(String.format("  confidence (top-1 probability): %4f", pMax));
-				
+
 				double ent = entropyBits(probs);
 				inferenceOutput.add("  uncertainty (entropy): " + String.format("%.3f bits", ent));
 				double maxEnt = Math.log(probs.length) / Math.log(2.0); // log2(N)
@@ -309,12 +309,12 @@ public final class OnnxImageClassifier implements Closeable {
 				for(String s : inferenceOutput) {
 					Log.getInstance().info(s);
 				}
-	
+
                 return topK(probs, k);
             }
         }
     }
-    
+
     /**
      * Get inference output for feedback
      * @return inference output as ArrayList<String>
@@ -322,10 +322,10 @@ public final class OnnxImageClassifier implements Closeable {
     public ArrayList<String> getInferenceOutput(){
 		return inferenceOutput;
 	}
-    
+
     /**
 	 * Get model meta data for feedback
-	 * 
+	 *
 	 * @return model meta data as ArrayList<String>
 	 */
 	public ArrayList<String> getModelMetaData() {
@@ -352,7 +352,7 @@ public final class OnnxImageClassifier implements Closeable {
     public boolean isNchw() {
         return nchw;
     }
-    
+
     /**
      * Compute Shannon entropy (base-2) of a probability distribution.
      *
@@ -540,7 +540,7 @@ public final class OnnxImageClassifier implements Closeable {
         }
     }
 
- 
+
     private List<ClassScore> topK(float[] probs, int k) {
         List<Map.Entry<Integer, Float>> idx = new ArrayList<>(probs.length);
         for (int i = 0; i < probs.length; i++) {
@@ -575,10 +575,14 @@ public final class OnnxImageClassifier implements Closeable {
             return fa;
         }
         if (outObj instanceof float[][] f2) {
-            if (f2.length == 1) return f2[0];
+            if (f2.length == 1) {
+				return f2[0];
+			}
         }
         if (outObj instanceof float[][][] f3) {
-            if (f3.length == 1 && f3[0].length == 1) return f3[0][0];
+            if (f3.length == 1 && f3[0].length == 1) {
+				return f3[0][0];
+			}
         }
         throw new IllegalArgumentException("Unsupported ONNX output type: " + outObj.getClass());
     }
@@ -591,7 +595,9 @@ public final class OnnxImageClassifier implements Closeable {
      */
     private static float[] softmax(float[] logits) {
         float max = Float.NEGATIVE_INFINITY;
-        for (float v : logits) max = Math.max(max, v);
+        for (float v : logits) {
+			max = Math.max(max, v);
+		}
 
         double sum = 0.0;
         double[] exps = new double[logits.length];
@@ -602,7 +608,9 @@ public final class OnnxImageClassifier implements Closeable {
         }
 
         float[] p = new float[logits.length];
-        if (sum == 0.0) return p;
+        if (sum == 0.0) {
+			return p;
+		}
 
         for (int i = 0; i < logits.length; i++) {
             p[i] = (float) (exps[i] / sum);

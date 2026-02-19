@@ -48,19 +48,19 @@ public class ImageClassifierView extends BaseView {
 
 	private OnnxImageClassifier onnx; // model runner
 	private boolean onnxReady = false;
-	
+
 	// current image
 	private BufferedImage currentImage;
 
 	// Optional: remember source for later (model metadata, etc.)
 	private Path currentImagePath;
-	
+
 	// Current classification results
 	private List<ClassScore> currentResults;
-	
+
 	// Rectangle where the image is drawn
 	private Rectangle imageRect;
-	
+
 	// Consumer for classification results
 	private Consumer<List<ClassScore>> classificationResultConsumer;
 
@@ -88,11 +88,11 @@ public class ImageClassifierView extends BaseView {
 				drawImage(g2, container, currentImage);
 			}
 		};
-		
+
 		getContainer().setBeforeDraw(imageDrawer);
 
 	}
-	
+
 	// Add the status label below the image panel.
 	private void addStatusLabel() {
 		statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
@@ -104,7 +104,7 @@ public class ImageClassifierView extends BaseView {
 		statusLabel.setBorder(BorderFactory.createLineBorder(Color.darkGray));
 		add(statusLabel, BorderLayout.SOUTH);
 	}
-	
+
 	// Add the feedback pane to the east side.
 	private void addFeedback() {
 		FeedbackPane fbp = initFeedback();
@@ -228,7 +228,7 @@ public class ImageClassifierView extends BaseView {
 			Log.getInstance().warning("Error reading image file [" + file.getAbsolutePath() + "]: " + e.getMessage());
 		}
 	}
-	
+
 	// Draw the image centered and scaled to fit within the container.
 	private void drawImage(Graphics2D g2, IContainer ctr, BufferedImage image) {
 		if (image == null) {
@@ -236,19 +236,19 @@ public class ImageClassifierView extends BaseView {
 			return;
 		}
 	    Objects.requireNonNull(container, "container");
-        
+
         BaseContainer container = (BaseContainer) ctr;
-        
+
         Rectangle bounds = container.getBounds();
 	    int w = bounds.width;
 	    int h = bounds.height;
 	    int iw = image.getWidth();
 	    int ih = image.getHeight();
-	    
+
 		g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 		g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-	    
+
 		double sx = (double) w / iw;
 		double sy = (double) h / ih;
 		double s = Math.min(sx, sy);
@@ -261,9 +261,9 @@ public class ImageClassifierView extends BaseView {
 
 		g2.drawImage(image, x, y, dw, dh, null);
 		imageRect = new Rectangle(x, y, dw, dh);
-		
+
 	}
-	
+
 	// Provide feedback strings showing screen and world coordinates
 	// items will ad to the feedback when they are mouse-overed
 	@Override
@@ -290,8 +290,8 @@ public class ImageClassifierView extends BaseView {
 				Color color = new Color(clr, true);
 				feedbackStrings
 						.add("Red: " + color.getRed() + " Green: " + color.getGreen() + " Blue: " + color.getBlue());
-				
-				
+
+
 				if (currentResults != null && !currentResults.isEmpty()) {
 					int maxClassesToShow = Math.min(5, currentResults.size());
 					feedbackStrings.add(" "); // empty line
@@ -300,9 +300,9 @@ public class ImageClassifierView extends BaseView {
 						ClassScore cs = currentResults.get(i);
 						feedbackStrings.add(String.format("$yellow$  %s: %.4f%%", cs.label(), cs.score() * 100));
 					}
-					
+
 					// top max of 3 cumulative probability
-					
+
 					double cumulativeProb = 0.0;
 					int count = 0;
 					feedbackStrings.add(" "); // empty line
@@ -315,9 +315,9 @@ public class ImageClassifierView extends BaseView {
 						if (count >= 3) {
 							break;
 						}
-						
+
 					}
-					
+
 					feedbackStrings.add(" "); // empty line
 					ArrayList<String> metaData = onnx.getModelMetaData();
 					if (metaData != null && !metaData.isEmpty()) {
