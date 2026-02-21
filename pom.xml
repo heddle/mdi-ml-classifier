@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>edu.cnu</groupId>
 	<artifactId>mdi-ml-classifier</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>1.0.1-SNAPSHOT</version>
 	<name>MDI Classifier</name>
 
 	<properties>
