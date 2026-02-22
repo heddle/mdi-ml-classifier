@@ -25,10 +25,10 @@
 		<dependency>
 			<groupId>io.github.heddle</groupId>
 			<artifactId>mdi</artifactId>
-			<version>1.0.0</version>
+			<version>1.0.1-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-		<!-- ONNX Runtime -->
+			<!-- ONNX Runtime -->
 			<groupId>com.microsoft.onnxruntime</groupId>
 			<artifactId>onnxruntime</artifactId>
 			<version>1.23.2</version>
