@@ -76,10 +76,10 @@ public class ImageClassifierView extends BaseView {
 
 		// Set up drag and drop handling
 
-		JComponent jc = (JComponent) getContainer().getComponent();
+		JComponent jc = (JComponent) getIContainer().getComponent();
 		jc.setTransferHandler(new FileDropHandler(this));
 
-		getContainer().getFeedbackControl().addFeedbackProvider(this);
+		getIContainer().getFeedbackControl().addFeedbackProvider(this);
 
 		IDrawable imageDrawer = new IDrawable() {
 
@@ -89,7 +89,7 @@ public class ImageClassifierView extends BaseView {
 			}
 		};
 
-		getContainer().setBeforeDraw(imageDrawer);
+		getIContainer().setBeforeDraw(imageDrawer);
 
 	}
 
@@ -164,7 +164,7 @@ public class ImageClassifierView extends BaseView {
 		} else {
 			runFakeInferenceAsync(img);
 		}
-		getContainer().refresh();
+		getIContainer().refresh();
 	}
 
 	// Simulate an asynchronous inference process with fake results.
