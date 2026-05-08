@@ -31,10 +31,10 @@ import edu.cnu.mdi.graphics.drawable.IDrawable;
 import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
-import edu.cnu.mdi.properties.PropertyUtils;
 import edu.cnu.mdi.transfer.FileDropHandler;
 import edu.cnu.mdi.transfer.ImageFilters;
 import edu.cnu.mdi.ui.fonts.Fonts;
+import edu.cnu.mdi.util.PropertyUtils;
 import edu.cnu.mdi.view.BaseView;
 
 @SuppressWarnings("serial")

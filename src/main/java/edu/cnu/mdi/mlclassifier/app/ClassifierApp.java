@@ -11,9 +11,9 @@ import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
 import edu.cnu.mdi.mlclassifier.view.ImageClassifierView;
 import edu.cnu.mdi.mlclassifier.view.PlotSupport;
-import edu.cnu.mdi.properties.PropertyUtils;
 import edu.cnu.mdi.splot.plot.PlotPanel;
 import edu.cnu.mdi.splot.plot.PlotView;
+import edu.cnu.mdi.util.PropertyUtils;
 import edu.cnu.mdi.view.LogView;
 import edu.cnu.mdi.view.ViewManager;
 
@@ -39,7 +39,8 @@ public class ClassifierApp extends BaseMDIApplication {
 	 * This method only builds views; it should not depend on the outer frame being
 	 * shown or on final geometry.
 	 */
-	private void addInitialViews() {
+	@Override
+	protected void addInitialViews() {
 		LogView logView = new LogView();
 		ViewManager.getInstance().getViewMenu().addSeparator();
 		logView.setVisible(false);
