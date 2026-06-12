@@ -28,9 +28,6 @@ public class ClassifierApp extends BaseMDIApplication {
 	 */
 	public ClassifierApp(Object... keyVals) {
 		super(keyVals);
-
-		// Create internal views. (Do not depend on the outer frame being visible here.)
-		addInitialViews();
 	}
 
 	/**
