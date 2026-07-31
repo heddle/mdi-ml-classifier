@@ -41,7 +41,7 @@ import edu.cnu.mdi.view.BaseView;
 public class ImageClassifierView extends BaseView {
 
 	// default side panel width (feedback)
-	private static final int SIDE_PANEL_WIDTH = 230;
+	private static final int SIDE_PANEL_WIDTH = 250;
 
 	// status label
 	private final JLabel statusLabel = new JLabel("Drop an image here (or use File → Open)", SwingConstants.CENTER);
@@ -107,7 +107,7 @@ public class ImageClassifierView extends BaseView {
 
 	// Add the feedback pane to the east side.
 	private void addFeedback() {
-		FeedbackPane fbp = initFeedback();
+		FeedbackPane fbp = initFeedback(Color.cyan, Color.black, 11);
 		Dimension feedbackPref = fbp.getPreferredSize();
 		fbp.setPreferredSize(new Dimension(SIDE_PANEL_WIDTH, feedbackPref.height));
 		add(fbp, BorderLayout.EAST);
