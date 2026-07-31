@@ -12,10 +12,11 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
@@ -37,6 +38,10 @@ import edu.cnu.mdi.ui.fonts.Fonts;
 import edu.cnu.mdi.util.PropertyUtils;
 import edu.cnu.mdi.view.BaseView;
 
+/**
+ * MDI view that displays a dropped image, runs ONNX classification, and exposes
+ * image and inference details through the standard feedback pane.
+ */
 @SuppressWarnings("serial")
 public class ImageClassifierView extends BaseView {
 
@@ -46,8 +51,8 @@ public class ImageClassifierView extends BaseView {
 	// status label
 	private final JLabel statusLabel = new JLabel("Drop an image here (or use File → Open)", SwingConstants.CENTER);
 
-	private OnnxImageClassifier onnx; // model runner
-	private boolean onnxReady = false;
+	private final OnnxImageClassifier onnx;
+	private final AtomicLong classificationSequence = new AtomicLong();
 
 	// current image
 	private BufferedImage currentImage;
@@ -64,12 +69,16 @@ public class ImageClassifierView extends BaseView {
 	// Consumer for classification results
 	private Consumer<List<ClassScore>> classificationResultConsumer;
 
+	/**
+	 * Create an image-classifier view.
+	 *
+	 * @param classifier model runner owned by the application
+	 * @param keyVals optional properties that override the view defaults
+	 */
 	public ImageClassifierView(OnnxImageClassifier classifier, Object... keyVals) {
-		super(PropertyUtils.TITLE, "Image Classifier", PropertyUtils.FRACTION, 0.7, PropertyUtils.ASPECT, 1.2,
-				PropertyUtils.VISIBLE, true);
+		super(viewProperties(keyVals));
 
-		onnx = classifier;
-		onnxReady = true;
+		onnx = Objects.requireNonNull(classifier, "classifier");
 		setFileFilter(ImageFilters.isActualImage);
 		addStatusLabel();
 		addFeedback();
@@ -91,6 +100,17 @@ public class ImageClassifierView extends BaseView {
 
 		getIContainer().setBeforeDraw(imageDrawer);
 
+	}
+
+	private static Object[] viewProperties(Object... overrides) {
+		Object[] defaults = { PropertyUtils.TITLE, "Image Classifier", PropertyUtils.FRACTION, 0.7,
+				PropertyUtils.ASPECT, 1.2, PropertyUtils.VISIBLE, true };
+		if (overrides == null || overrides.length == 0) {
+			return defaults;
+		}
+		Object[] properties = Arrays.copyOf(defaults, defaults.length + overrides.length);
+		System.arraycopy(overrides, 0, properties, defaults.length, overrides.length);
+		return properties;
 	}
 
 	// Add the status label below the image panel.
@@ -132,20 +152,21 @@ public class ImageClassifierView extends BaseView {
 	 */
 	public void setImage(BufferedImage img, Path sourcePath) {
 		Objects.requireNonNull(img, "img");
+		if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+			javax.swing.SwingUtilities.invokeLater(() -> setImage(img, sourcePath));
+			return;
+		}
+		long request = classificationSequence.incrementAndGet();
 		this.currentImagePath = sourcePath;
 		currentImage = img;
-
-		if (sourcePath != null) {
-			setStatusText("Loaded image from " + sourcePath.getFileName().toString());
-		} else {
-			setStatusText("Image loaded");
-		}
-
+		currentResults = null;
 		setStatusText("Classifying image...");
 
-		if (onnxReady && onnx != null) {
-			onnx.classifyAsync(img, 5).whenComplete((results, err) -> {
+		onnx.classifyAsync(img, 5).whenComplete((results, err) -> {
 				javax.swing.SwingUtilities.invokeLater(() -> {
+					if (request != classificationSequence.get()) {
+						return;
+					}
 					if (err != null) {
 						Throwable root = (err instanceof CompletionException && err.getCause() != null) ? err.getCause()
 								: err;
@@ -155,42 +176,13 @@ public class ImageClassifierView extends BaseView {
 					}
 
 					setStatusText("Classification complete.");
-					currentResults = results;
+					currentResults = List.copyOf(results);
 					if (classificationResultConsumer != null) {
 						classificationResultConsumer.accept(results);
 					}
 				});
 			});
-		} else {
-			runFakeInferenceAsync(img);
-		}
 		getIContainer().refresh();
-	}
-
-	// Simulate an asynchronous inference process with fake results.
-	private void runFakeInferenceAsync(BufferedImage img) {
-
-		Thread t = new Thread(() -> {
-			try {
-				Thread.sleep(150);
-			} catch (InterruptedException ignored) {
-			}
-
-			var results = java.util.List.of(new edu.cnu.mdi.mlclassifier.model.ClassScore("cat", 0.62),
-					new edu.cnu.mdi.mlclassifier.model.ClassScore("dog", 0.21),
-					new edu.cnu.mdi.mlclassifier.model.ClassScore("car", 0.09),
-					new edu.cnu.mdi.mlclassifier.model.ClassScore("airplane", 0.05),
-					new edu.cnu.mdi.mlclassifier.model.ClassScore("pizza", 0.03));
-
-			javax.swing.SwingUtilities.invokeLater(() -> {
-				if (classificationResultConsumer != null) {
-					classificationResultConsumer.accept(results);
-				}
-			});
-		}, "InferenceWorker");
-
-		t.setDaemon(true);
-		t.start();
 	}
 
 	/**
@@ -199,6 +191,11 @@ public class ImageClassifierView extends BaseView {
 	 * @param message the status message to display.
 	 */
 	public void setStatusText(String message) {
+		Objects.requireNonNull(message, "message");
+		if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+			javax.swing.SwingUtilities.invokeLater(() -> setStatusText(message));
+			return;
+		}
 		statusLabel.setText(message);
 	}
 
@@ -210,7 +207,6 @@ public class ImageClassifierView extends BaseView {
 	@Override
 	public void filesDropped(List<File> files) {
 		if (files == null || files.isEmpty()) {
-			currentImagePath = null;
 			return;
 		}
 		File file = files.get(0);
@@ -218,14 +214,14 @@ public class ImageClassifierView extends BaseView {
 			BufferedImage img = ImageIO.read(file);
 			if (img == null) {
 				Log.getInstance().warning("The dropped file is not a valid image: " + file.getAbsolutePath());
+				setStatusText("The dropped file is not a valid image.");
 				return;
 			}
-			currentImagePath = file.toPath();
 			setImage(img, file.toPath());
 			Log.getInstance().info("Loaded image file: " + file.getAbsolutePath());
 		} catch (IOException e) {
-			currentImagePath = null;
 			Log.getInstance().warning("Error reading image file [" + file.getAbsolutePath() + "]: " + e.getMessage());
+			setStatusText("Unable to read the dropped image (see log).");
 		}
 	}
 
@@ -235,7 +231,7 @@ public class ImageClassifierView extends BaseView {
 			imageRect = null;
 			return;
 		}
-	    Objects.requireNonNull(container, "container");
+		Objects.requireNonNull(ctr, "container");
 
         BaseContainer container = (BaseContainer) ctr;
 
@@ -284,9 +280,9 @@ public class ImageClassifierView extends BaseView {
 				String coordStrImg = String.format("Pixel: (%d, %d) %s", imgX, imgY, inImageStr);
 				feedbackStrings.add(coordStrImg);
 
-				int clr = currentImage.getRGB(
-						(int) Math.round((double) imgX * currentImage.getWidth() / imageRect.width),
-						(int) Math.round((double) imgY * currentImage.getHeight() / imageRect.height));
+				Point imagePoint = imagePixelForDisplayPoint(imgX, imgY, imageRect.width, imageRect.height,
+						currentImage.getWidth(), currentImage.getHeight());
+				int clr = currentImage.getRGB(imagePoint.x, imagePoint.y);
 				Color color = new Color(clr, true);
 				feedbackStrings
 						.add("Red: " + color.getRed() + " Green: " + color.getGreen() + " Blue: " + color.getBlue());
@@ -319,7 +315,7 @@ public class ImageClassifierView extends BaseView {
 					}
 
 					feedbackStrings.add(" "); // empty line
-					ArrayList<String> metaData = onnx.getModelMetaData();
+					List<String> metaData = onnx.getModelMetaData();
 					if (metaData != null && !metaData.isEmpty()) {
 						feedbackStrings.add("$light green$Model Metadata:");
 						for (String line : metaData) {
@@ -328,7 +324,7 @@ public class ImageClassifierView extends BaseView {
 					}
 
 					feedbackStrings.add(" "); // empty line
-					ArrayList<String> inferenceOutput = onnx.getInferenceOutput();
+					List<String> inferenceOutput = onnx.getInferenceOutput();
 					for (String line : inferenceOutput) {
 						feedbackStrings.add("$white$" + line);
 					}
@@ -336,6 +332,18 @@ public class ImageClassifierView extends BaseView {
 			}
 		}
 
+	}
+
+	static Point imagePixelForDisplayPoint(int displayX, int displayY, int displayWidth, int displayHeight,
+			int imageWidth, int imageHeight) {
+		if (displayWidth <= 0 || displayHeight <= 0 || imageWidth <= 0 || imageHeight <= 0) {
+			throw new IllegalArgumentException("image and display dimensions must be positive");
+		}
+		int x = (int) Math.min(imageWidth - 1L,
+				(long) Math.max(0, displayX) * imageWidth / displayWidth);
+		int y = (int) Math.min(imageHeight - 1L,
+				(long) Math.max(0, displayY) * imageHeight / displayHeight);
+		return new Point(x, y);
 	}
 
 }

@@ -1,6 +1,7 @@
 package edu.cnu.mdi.mlclassifier.view;
 
 import java.util.List;
+import java.util.Objects;
 
 import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
@@ -8,7 +9,11 @@ import edu.cnu.mdi.splot.pdata.PlotDataException;
 import edu.cnu.mdi.splot.plot.BarPlot;
 import edu.cnu.mdi.splot.plot.PlotPanel;
 
-public class PlotSupport {
+/** Utilities for presenting classification results with sPlot. */
+public final class PlotSupport {
+
+	private PlotSupport() {
+	}
 
 	/**
 	 * Create a bar plot from classification results.
@@ -17,6 +22,7 @@ public class PlotSupport {
 	 * @return a PlotPanel containing the bar plot, or null if results are empty
 	 */
 	public static PlotPanel createBarPlot(List<ClassScore> results) {
+		Objects.requireNonNull(results, "results");
 		int n = results.size();
 		if (n == 0) {
 			return null;

@@ -7,6 +7,7 @@ import java.util.List;
 
 import ai.onnxruntime.OrtException;
 import edu.cnu.mdi.app.BaseMDIApplication;
+import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
 import edu.cnu.mdi.mlclassifier.view.ImageClassifierView;
@@ -17,10 +18,12 @@ import edu.cnu.mdi.util.PropertyUtils;
 import edu.cnu.mdi.view.LogView;
 import edu.cnu.mdi.view.ViewManager;
 
+/** Desktop application for classifying images with an ONNX model. */
 @SuppressWarnings("serial")
 public class ClassifierApp extends BaseMDIApplication {
 
 	private PlotView plotView;
+	private OnnxImageClassifier classifier;
 	/**
 	 * Constructor.
 	 *
@@ -52,11 +55,12 @@ public class ClassifierApp extends BaseMDIApplication {
 		Path labelsPath = wd.resolve("models/imagenet_labels.txt");
 
 		try {
-		    OnnxImageClassifier classifier = new OnnxImageClassifier(modelPath, labelsPath);
+		    classifier = new OnnxImageClassifier(modelPath, labelsPath);
 		    ImageClassifierView imageView = new ImageClassifierView(classifier);
 		    imageView.setResultConsumer(results -> makeBarPlot(results));
 		} catch (OrtException | IOException e) {
-		    e.printStackTrace();
+			Log.getInstance().warning("Unable to load the classifier model: " + e.getMessage());
+			logView.setVisible(true);
 		}
 
 
@@ -69,6 +73,20 @@ public class ClassifierApp extends BaseMDIApplication {
     		plotView.switchToPlotPanel(plotPanel);
     	}
     }
+
+	/** Release the ONNX session and inference worker during application shutdown. */
+	@Override
+	protected void prepareForShutdown() {
+		try {
+			if (classifier != null) {
+				classifier.close();
+			}
+		} catch (IOException e) {
+			Log.getInstance().warning("Unable to close the classifier cleanly: " + e.getMessage());
+		} finally {
+			super.prepareForShutdown();
+		}
+	}
 
 
 	@Override
