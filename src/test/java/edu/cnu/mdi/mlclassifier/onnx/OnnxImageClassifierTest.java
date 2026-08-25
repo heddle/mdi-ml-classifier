@@ -7,14 +7,46 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.Rectangle;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
 class OnnxImageClassifierTest {
+
+	@Test
+	void tinyFixtureExercisesCompleteOnnxRuntimeLifecycle() throws Exception {
+		Path model = resourcePath("tiny-rgb-classifier.onnx");
+		Path labels = resourcePath("tiny-rgb-labels.txt");
+		OnnxImageClassifier classifier = new OnnxImageClassifier(model, labels,
+				OnnxImageClassifier.NormType.SCALE_0_1);
+		try {
+			assertEquals(2, classifier.getInputWidth());
+			assertEquals(2, classifier.getInputHeight());
+			assertEquals(true, classifier.isNchw());
+
+			List<edu.cnu.mdi.mlclassifier.model.ClassScore> redResults =
+					classifier.classify(solidImage(Color.RED), 3);
+			assertEquals(List.of("red", "green", "blue"),
+					redResults.stream().map(edu.cnu.mdi.mlclassifier.model.ClassScore::label).toList());
+			assertEquals(1.0, redResults.get(0).score(), 1.0e-6);
+			assertEquals(1.0, classifier.getInferenceSummary().orElseThrow().probabilitySum(), 1.0e-6);
+
+			var greenResults = classifier.classifyAsync(solidImage(Color.GREEN), 1)
+					.get(5, TimeUnit.SECONDS);
+			assertEquals("green", greenResults.get(0).label());
+			assertEquals(1, greenResults.size());
+		} finally {
+			classifier.close();
+		}
+		assertThrows(IllegalStateException.class,
+				() -> classifier.classifyAsync(solidImage(Color.BLUE), 1));
+		classifier.close(); // close is deliberately idempotent
+	}
 
 	@Test
 	void classifiesWithLocalMobileNetModelWhenAvailable() throws Exception {
@@ -85,5 +117,28 @@ class OnnxImageClassifierTest {
 	void readsTrimmedNonEmptyLabels() throws Exception {
 		assertEquals(List.of("tench", "goldfish"),
 				OnnxImageClassifier.readLabels(Path.of("models", "imagenet_labels.txt")).subList(0, 2));
+	}
+
+	@Test
+	void tensorSizeArithmeticRejectsInvalidAndOverflowingModels() {
+		assertEquals(3 * 224 * 224, OnnxImageClassifier.tensorElementCount(224, 224));
+		assertThrows(IllegalArgumentException.class,
+				() -> OnnxImageClassifier.tensorElementCount(0, 224));
+		assertThrows(IllegalStateException.class,
+				() -> OnnxImageClassifier.tensorElementCount(Integer.MAX_VALUE, 2));
+	}
+
+	private static Path resourcePath(String name) throws Exception {
+		return Path.of(OnnxImageClassifierTest.class.getResource(name).toURI());
+	}
+
+	private static BufferedImage solidImage(Color color) {
+		BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+		for (int y = 0; y < image.getHeight(); y++) {
+			for (int x = 0; x < image.getWidth(); x++) {
+				image.setRGB(x, y, color.getRGB());
+			}
+		}
+		return image;
 	}
 }

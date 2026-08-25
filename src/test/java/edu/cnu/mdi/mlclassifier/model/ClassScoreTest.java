@@ -16,6 +16,7 @@ class ClassScoreTest {
 	@Test
 	void rejectsInvalidResults() {
 		assertThrows(NullPointerException.class, () -> new ClassScore(null, 0.5));
+		assertThrows(IllegalArgumentException.class, () -> new ClassScore("  ", 0.5));
 		assertThrows(IllegalArgumentException.class, () -> new ClassScore("low", -0.1));
 		assertThrows(IllegalArgumentException.class, () -> new ClassScore("high", 1.1));
 		assertThrows(IllegalArgumentException.class, () -> new ClassScore("nan", Double.NaN));

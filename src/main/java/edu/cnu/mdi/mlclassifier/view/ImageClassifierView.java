@@ -14,28 +14,44 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.prefs.Preferences;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.SwingConstants;
 
 import edu.cnu.mdi.container.BaseContainer;
 import edu.cnu.mdi.container.IContainer;
+import edu.cnu.mdi.dialog.FileDialogs;
+import edu.cnu.mdi.dialog.FileType;
 import edu.cnu.mdi.feedback.FeedbackPane;
 import edu.cnu.mdi.graphics.drawable.IDrawable;
+import edu.cnu.mdi.graphics.toolbar.ToolBits;
+import edu.cnu.mdi.io.RecentFiles;
+import edu.cnu.mdi.io.RecentFilesMenu;
 import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
+import edu.cnu.mdi.mlclassifier.model.ImageClassifier;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
 import edu.cnu.mdi.swing.SwingSizingUtils;
 import edu.cnu.mdi.transfer.FileDropHandler;
 import edu.cnu.mdi.transfer.ImageFilters;
 import edu.cnu.mdi.ui.fonts.Fonts;
 import edu.cnu.mdi.util.PropertyUtils;
+import edu.cnu.mdi.view.AbstractViewInfo;
 import edu.cnu.mdi.view.BaseView;
 
 /**
@@ -47,12 +63,25 @@ public class ImageClassifierView extends BaseView {
 
 	// default side panel width (feedback)
 	private static final int SIDE_PANEL_WIDTH = 250;
+	private static final FileType IMAGE_FILE_TYPE = FileType.of(
+			"Images", ImageIO.getReaderFileSuffixes());
+	private static final int DEFAULT_TOP_K = 5;
+	private static final int MAX_TOP_K = 100;
+	private static final int[] TOP_K_CHOICES = { 1, 3, 5, 10, 20 };
 
 	// status label
-	private final JLabel statusLabel = new JLabel("Drop an image here (or use File → Open)", SwingConstants.CENTER);
+	private final JLabel statusLabel = new JLabel("Drop an image here (or use Image → Open Image)", SwingConstants.CENTER);
 
-	private final OnnxImageClassifier onnx;
+	private volatile ImageClassifier classifier;
+	private final AtomicLong imageLoadSequence = new AtomicLong();
 	private final AtomicLong classificationSequence = new AtomicLong();
+	private CompletableFuture<BufferedImage> imageLoadFuture;
+	private CompletableFuture<List<ClassScore>> classificationFuture;
+	private RecentFiles recentImages;
+	private RecentFilesMenu recentImagesHelper;
+	private JMenu recentImagesMenu;
+	private Preferences resultPreferences;
+	private int topK;
 
 	// current image
 	private BufferedImage currentImage;
@@ -75,13 +104,17 @@ public class ImageClassifierView extends BaseView {
 	 * @param classifier model runner owned by the application
 	 * @param keyVals optional properties that override the view defaults
 	 */
-	public ImageClassifierView(OnnxImageClassifier classifier, Object... keyVals) {
+	public ImageClassifierView(ImageClassifier classifier, Object... keyVals) {
 		super(viewProperties(keyVals));
 
-		onnx = Objects.requireNonNull(classifier, "classifier");
+		this.classifier = Objects.requireNonNull(classifier, "classifier");
+		resultPreferences = Preferences.userNodeForPackage(getClass()).node("results");
+		topK = validStoredTopK(resultPreferences.getInt("topK", DEFAULT_TOP_K));
 		setFileFilter(ImageFilters.isActualImage);
 		addStatusLabel();
 		addFeedback();
+		installImageMenu();
+		installResultsMenu();
 
 		// Set up drag and drop handling
 
@@ -102,9 +135,20 @@ public class ImageClassifierView extends BaseView {
 
 	}
 
+	/** Backward-compatible constructor for callers coupled to ONNX Runtime. */
+	public ImageClassifierView(OnnxImageClassifier classifier, Object... keyVals) {
+		this((ImageClassifier) classifier, keyVals);
+	}
+
+	@Override
+	public AbstractViewInfo getViewInfo() {
+		return new ImageClassifierViewInfo();
+	}
+
 	private static Object[] viewProperties(Object... overrides) {
 		Object[] defaults = { PropertyUtils.TITLE, "Image Classifier", PropertyUtils.FRACTION, 0.7,
-				PropertyUtils.ASPECT, 1.2, PropertyUtils.VISIBLE, true };
+				PropertyUtils.ASPECT, 1.2, PropertyUtils.VISIBLE, true,
+				PropertyUtils.TOOLBARBITS, ToolBits.INFO };
 		if (overrides == null || overrides.length == 0) {
 			return defaults;
 		}
@@ -117,7 +161,7 @@ public class ImageClassifierView extends BaseView {
 	private void addStatusLabel() {
 		statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 		statusLabel.setFont(Fonts.defaultFont);
-		statusLabel.setText("Model loaded. Drop an image above to classify.");
+		statusLabel.setText("Model loaded. Drop an image above or use Image → Open Image…");
 		statusLabel.setOpaque(true);
 		statusLabel.setBackground(Color.lightGray);
 		statusLabel.setForeground(Color.black);
@@ -143,6 +187,64 @@ public class ImageClassifierView extends BaseView {
 		classificationResultConsumer = consumer;
 	}
 
+	/** @return the requested number of highest-scoring classifications */
+	public int getTopK() {
+		return topK;
+	}
+
+	/** @return the current image source, or {@code null} for an in-memory image */
+	public Path getCurrentImagePath() {
+		return currentImagePath;
+	}
+
+	/**
+	 * Set the requested number of results. An image already on display is
+	 * reclassified immediately.
+	 *
+	 * @param count result count from 1 through 100
+	 */
+	public void setTopK(int count) {
+		if (count < 1 || count > MAX_TOP_K) {
+			throw new IllegalArgumentException("topK must be between 1 and " + MAX_TOP_K);
+		}
+		if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+			javax.swing.SwingUtilities.invokeLater(() -> setTopK(count));
+			return;
+		}
+		if (topK == count) {
+			return;
+		}
+		topK = count;
+		resultPreferences.putInt("topK", count);
+		if (currentImage != null) {
+			setDecodedImage(currentImage, currentImagePath);
+		}
+	}
+
+	/**
+	 * Replace the classifier used by this view. If an image is already displayed,
+	 * it is classified again with the replacement model.
+	 *
+	 * @param replacement the newly loaded classifier
+	 */
+	public void setClassifier(ImageClassifier replacement) {
+		Objects.requireNonNull(replacement, "replacement");
+		if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+			javax.swing.SwingUtilities.invokeLater(() -> setClassifier(replacement));
+			return;
+		}
+		classificationSequence.incrementAndGet();
+		cancel(classificationFuture);
+		classifier = replacement;
+		currentResults = null;
+		if (currentImage == null) {
+			setStatusText("Model loaded. Drop an image above or use Image → Open Image…");
+			getIContainer().refresh();
+		} else {
+			setDecodedImage(currentImage, currentImagePath);
+		}
+	}
+
 
 	/**
 	 * Set the image to display in this view and to be classified
@@ -156,20 +258,31 @@ public class ImageClassifierView extends BaseView {
 			javax.swing.SwingUtilities.invokeLater(() -> setImage(img, sourcePath));
 			return;
 		}
+		imageLoadSequence.incrementAndGet();
+		cancel(imageLoadFuture);
+		setDecodedImage(img, sourcePath);
+	}
+
+	private void setDecodedImage(BufferedImage img, Path sourcePath) {
 		long request = classificationSequence.incrementAndGet();
+		cancel(classificationFuture);
 		this.currentImagePath = sourcePath;
 		currentImage = img;
 		currentResults = null;
-		setStatusText("Classifying image...");
+		setStatusText("Classifying image (top " + topK + ")...");
 
-		onnx.classifyAsync(img, 5).whenComplete((results, err) -> {
-				javax.swing.SwingUtilities.invokeLater(() -> {
+		classificationFuture = classifier.classifyAsync(img, topK);
+		classificationFuture.whenComplete((results, err) -> {
+			javax.swing.SwingUtilities.invokeLater(() -> {
 					if (request != classificationSequence.get()) {
 						return;
 					}
 					if (err != null) {
 						Throwable root = (err instanceof CompletionException && err.getCause() != null) ? err.getCause()
 								: err;
+						if (root instanceof CancellationException) {
+							return;
+						}
 						Log.getInstance().warning("ONNX inference failed: " + root.getMessage());
 						setStatusText("Classification failed (see log).");
 						return;
@@ -178,7 +291,7 @@ public class ImageClassifierView extends BaseView {
 					setStatusText("Classification complete.");
 					currentResults = List.copyOf(results);
 					if (classificationResultConsumer != null) {
-						classificationResultConsumer.accept(results);
+						classificationResultConsumer.accept(currentResults);
 					}
 				});
 			});
@@ -209,20 +322,113 @@ public class ImageClassifierView extends BaseView {
 		if (files == null || files.isEmpty()) {
 			return;
 		}
-		File file = files.get(0);
-		try {
-			BufferedImage img = ImageIO.read(file);
-			if (img == null) {
-				Log.getInstance().warning("The dropped file is not a valid image: " + file.getAbsolutePath());
-				setStatusText("The dropped file is not a valid image.");
+		openImageFile(files.get(0), false);
+	}
+
+	private void chooseImage() {
+		FileDialogs.openFile(this, "classifier-image", "Open Image",
+				IMAGE_FILE_TYPE).ifPresent(path -> openImageFile(path.toFile(), true));
+	}
+
+	/**
+	 * Begin loading an image off the Swing EDT. A newer request supersedes an
+	 * older load that has not completed.
+	 */
+	boolean openImageFile(File file, boolean showDialogOnFailure) {
+		Objects.requireNonNull(file, "file");
+		long request = imageLoadSequence.incrementAndGet();
+		cancel(imageLoadFuture);
+		setStatusText("Loading image...");
+		imageLoadFuture = decodeImageAsync(file);
+		imageLoadFuture.whenComplete((img, err) -> javax.swing.SwingUtilities.invokeLater(() -> {
+			if (request != imageLoadSequence.get()) {
 				return;
 			}
-			setImage(img, file.toPath());
-			Log.getInstance().info("Loaded image file: " + file.getAbsolutePath());
-		} catch (IOException e) {
-			Log.getInstance().warning("Error reading image file [" + file.getAbsolutePath() + "]: " + e.getMessage());
-			setStatusText("Unable to read the dropped image (see log).");
+			if (err == null) {
+				setDecodedImage(img, file.toPath());
+				recentImages.add(file);
+				recentImagesHelper.rebuild(recentImagesMenu);
+				Log.getInstance().info("Loaded image file: " + file.getAbsolutePath());
+				return;
+			}
+			Throwable root = (err instanceof CompletionException && err.getCause() != null)
+					? err.getCause() : err;
+			if (root instanceof CancellationException) {
+				return;
+			}
+			recentImages.remove(file);
+			recentImagesHelper.rebuild(recentImagesMenu);
+			Log.getInstance().warning("Error reading image file [" + file.getAbsolutePath() + "]: " + root.getMessage());
+			setStatusText("Unable to read the image (see log).");
+			if (showDialogOnFailure) {
+				JOptionPane.showMessageDialog(this, root.getMessage(),
+						"Open Image Failed", JOptionPane.ERROR_MESSAGE);
+			}
+		}));
+		return true;
+	}
+
+	/** Decode an image without occupying the Swing event-dispatch thread. */
+	CompletableFuture<BufferedImage> decodeImageAsync(File file) {
+		return CompletableFuture.supplyAsync(() -> {
+			try {
+				BufferedImage image = ImageIO.read(file);
+				if (image == null) {
+					throw new IOException("The selected file is not a supported image.");
+				}
+				return image;
+			} catch (IOException e) {
+				throw new CompletionException(e);
+			}
+		});
+	}
+
+	private static void cancel(CompletableFuture<?> future) {
+		if (future != null && !future.isDone()) {
+			future.cancel(true);
 		}
+	}
+
+	private void installImageMenu() {
+		JMenuBar menuBar = getJMenuBar();
+		if (menuBar == null) {
+			menuBar = new JMenuBar();
+			setJMenuBar(menuBar);
+		}
+		recentImages = new RecentFiles(Preferences.userNodeForPackage(getClass())
+				.node("imageClassifier"), 10, "recentImage");
+		recentImagesHelper = new RecentFilesMenu(recentImages,
+				file -> openImageFile(file, true), "images");
+
+		JMenu imageMenu = new JMenu("Image");
+		JMenuItem openItem = new JMenuItem("Open Image…");
+		openItem.addActionListener(event -> chooseImage());
+		imageMenu.add(openItem);
+		recentImagesMenu = new JMenu("Recent Images");
+		recentImagesHelper.rebuild(recentImagesMenu);
+		imageMenu.add(recentImagesMenu);
+		BaseView.applyFocusFix(imageMenu, this);
+		menuBar.add(imageMenu);
+	}
+
+	private void installResultsMenu() {
+		JMenu resultsMenu = new JMenu("Results");
+		JMenu topKMenu = new JMenu("Number of Classes");
+		ButtonGroup group = new ButtonGroup();
+		for (int count : TOP_K_CHOICES) {
+			JRadioButtonMenuItem item = new JRadioButtonMenuItem(
+					Integer.toString(count), topK == count);
+			item.addActionListener(event -> setTopK(count));
+			group.add(item);
+			topKMenu.add(item);
+		}
+		resultsMenu.add(topKMenu);
+		BaseView.applyFocusFix(resultsMenu, this);
+		getJMenuBar().add(resultsMenu);
+	}
+
+	private static int validStoredTopK(int count) {
+		return count >= 1 && count <= MAX_TOP_K ? count : DEFAULT_TOP_K;
 	}
 
 	// Draw the image centered and scaled to fit within the container.
@@ -315,7 +521,7 @@ public class ImageClassifierView extends BaseView {
 					}
 
 					feedbackStrings.add(" "); // empty line
-					List<String> metaData = onnx.getModelMetaData();
+					List<String> metaData = classifier.getModelMetaData();
 					if (metaData != null && !metaData.isEmpty()) {
 						feedbackStrings.add("$light green$Model Metadata:");
 						for (String line : metaData) {
@@ -324,7 +530,7 @@ public class ImageClassifierView extends BaseView {
 					}
 
 					feedbackStrings.add(" "); // empty line
-					List<String> inferenceOutput = onnx.getInferenceOutput();
+					List<String> inferenceOutput = classifier.getInferenceOutput();
 					for (String line : inferenceOutput) {
 						feedbackStrings.add("$white$" + line);
 					}

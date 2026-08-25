@@ -9,13 +9,13 @@ import java.io.IOException;
 import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,6 +30,8 @@ import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.TensorInfo;
 import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
+import edu.cnu.mdi.mlclassifier.model.ImageClassifier;
+import edu.cnu.mdi.mlclassifier.model.InferenceSummary;
 
 /**
  * Minimal ONNX image classifier wrapper using ONNX Runtime (CPU).
@@ -71,7 +73,7 @@ import edu.cnu.mdi.mlclassifier.model.ClassScore;
  * The {@link OrtSession} is held for the lifetime of this classifier. Call {@link #close()}
  * when done (e.g., app shutdown) to release native resources.
  */
-public final class OnnxImageClassifier implements Closeable {
+public final class OnnxImageClassifier implements Closeable, ImageClassifier {
 
 	/** Supported input-pixel normalization schemes. */
 	public enum NormType {
@@ -135,6 +137,7 @@ public final class OnnxImageClassifier implements Closeable {
     private final List<String> labels; // may be null
     private final ExecutorService exec;
 	private final AtomicBoolean closed = new AtomicBoolean();
+	private final AtomicBoolean labelCountWarningLogged = new AtomicBoolean();
 
     // Norm type for preprocessing default
     private final NormType normType;
@@ -146,6 +149,7 @@ public final class OnnxImageClassifier implements Closeable {
 
     //used for feedback
 	private volatile List<String> inferenceOutput = List.of();
+	private volatile InferenceSummary inferenceSummary;
 	private final List<String> modelMetaData;
 
     /**
@@ -285,6 +289,7 @@ public final class OnnxImageClassifier implements Closeable {
      * @param topK number of top classes to return (minimum 1)
      * @return future that completes with top-K {@link ClassScore} results
      */
+    @Override
     public CompletableFuture<List<ClassScore>> classifyAsync(BufferedImage image, int topK) {
         Objects.requireNonNull(image, "image");
 		requireOpen();
@@ -354,6 +359,11 @@ public final class OnnxImageClassifier implements Closeable {
 				diagnostics.add(outputRange);
 
 				float[] probs = probabilitiesFromOutput(output);
+				if (labels != null && labels.size() != probs.length
+						&& labelCountWarningLogged.compareAndSet(false, true)) {
+					Log.getInstance().warning("Label count " + labels.size()
+							+ " does not match model output count " + probs.length);
+				}
 
                 // Optional check: sum should be ~1.0
                 float sum = 0f;
@@ -370,6 +380,7 @@ public final class OnnxImageClassifier implements Closeable {
 				double maxEnt = Math.log(probs.length) / Math.log(2.0); // log2(N)
 				double nEnt = (maxEnt == 0.0) ? 0.0 : (ent / maxEnt) * 100.0;
 				diagnostics.add("  uncertainty (normalized): " + String.format("%.2f%%", nEnt));
+				inferenceSummary = new InferenceSummary(dtMs, min, max, sum, pMax, ent, nEnt);
 				inferenceOutput = List.copyOf(diagnostics);
 				for (String s : diagnostics) {
 					Log.getInstance().info(s);
@@ -385,8 +396,14 @@ public final class OnnxImageClassifier implements Closeable {
      * Get inference output for feedback
      * @return immutable snapshot of the most recent inference diagnostics
      */
+    @Override
     public List<String> getInferenceOutput(){
 		return inferenceOutput;
+	}
+
+	@Override
+	public java.util.Optional<InferenceSummary> getInferenceSummary() {
+		return java.util.Optional.ofNullable(inferenceSummary);
 	}
 
     /**
@@ -394,6 +411,7 @@ public final class OnnxImageClassifier implements Closeable {
 	 *
 	 * @return immutable model metadata
 	 */
+	@Override
 	public List<String> getModelMetaData() {
 		return modelMetaData;
 	}
@@ -561,8 +579,9 @@ public final class OnnxImageClassifier implements Closeable {
             g.dispose();
         }
 
-        int totalPixels = inputW * inputH;
-        float[] out = new float[3 * totalPixels];
+		final int totalPixels = tensorElementCount(inputW, inputH) / 3;
+		final int tensorElements = totalPixels * 3;
+        float[] out = new float[tensorElements];
 
         if (nchw) {
             // [C, H, W] layout (Planar)
@@ -576,12 +595,10 @@ public final class OnnxImageClassifier implements Closeable {
                     float gf = ((rgb >> 8) & 0xFF);
                     float bf = (rgb & 0xFF);
 
-                    float[] normalized = applyNormalization(rf, gf, bf);
-
                     int p = y * inputW + x;
-                    out[p] = normalized[0];        // R plane
-                    out[idxG + p] = normalized[1]; // G plane
-                    out[idxB + p] = normalized[2]; // B plane
+                    out[p] = normalizeChannel(rf, 0);        // R plane
+                    out[idxG + p] = normalizeChannel(gf, 1); // G plane
+                    out[idxB + p] = normalizeChannel(bf, 2); // B plane
                 }
             }
         } else {
@@ -594,16 +611,27 @@ public final class OnnxImageClassifier implements Closeable {
                     float gf = ((rgb >> 8) & 0xFF);
                     float bf = (rgb & 0xFF);
 
-                    float[] normalized = applyNormalization(rf, gf, bf);
-
-                    out[i++] = normalized[0];
-                    out[i++] = normalized[1];
-                    out[i++] = normalized[2];
+                    out[i++] = normalizeChannel(rf, 0);
+                    out[i++] = normalizeChannel(gf, 1);
+                    out[i++] = normalizeChannel(bf, 2);
                 }
             }
         }
-        return out;
-    }
+		return out;
+	}
+
+	static int tensorElementCount(int width, int height) {
+		if (width <= 0 || height <= 0) {
+			throw new IllegalArgumentException("tensor dimensions must be positive");
+		}
+		try {
+			return Math.multiplyExact(3, Math.multiplyExact(width, height));
+		} catch (ArithmeticException exception) {
+			throw new IllegalStateException(
+					"Model image dimensions are too large: " + width + "x" + height,
+					exception);
+		}
+	}
 
 	static Rectangle centerCrop(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight) {
 		if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
@@ -619,50 +647,46 @@ public final class OnnxImageClassifier implements Closeable {
 		return new Rectangle(0, (sourceHeight - height) / 2, sourceWidth, height);
 	}
 
-    /**
-     * Helper to centralize the math for different model requirements.
-     */
-    private float[] applyNormalization(float r, float g, float b) {
-        switch (normType) {
-            case RESNET:
-                // Standard ImageNet Mean/Std subtraction
-                return new float[] {
-                    (r / 255.0f - mean[0]) / std[0],
-                    (g / 255.0f - mean[1]) / std[1],
-                    (b / 255.0f - mean[2]) / std[2]
-                };
-            case SCALE_NEG1_1:
-                // Maps 0-255 to -1.0 to 1.0 (Common for TF exports)
-                return new float[] {
-                    (r - 127.5f) / 127.5f,
-                    (g - 127.5f) / 127.5f,
-                    (b - 127.5f) / 127.5f
-                };
-            case SCALE_0_1:
-            default:
-                // Simple 0.0 to 1.0 scaling (Common for ONNX Zoo Lite models)
-                return new float[] { r / 255.0f, g / 255.0f, b / 255.0f };
-        }
+    /** Normalize one channel without allocating a temporary array per pixel. */
+    private float normalizeChannel(float value, int channel) {
+        return switch (normType) {
+            case RESNET -> (value / 255.0f - mean[channel]) / std[channel];
+            case SCALE_NEG1_1 -> (value - 127.5f) / 127.5f;
+            case SCALE_0_1 -> value / 255.0f;
+        };
     }
 
 
     private List<ClassScore> topK(float[] probs, int k) {
-        List<Map.Entry<Integer, Float>> idx = new ArrayList<>(probs.length);
-        for (int i = 0; i < probs.length; i++) {
-            idx.add(new AbstractMap.SimpleEntry<>(i, probs[i]));
-        }
-        idx.sort(Comparator.comparing(Map.Entry<Integer, Float>::getValue).reversed());
+		int n = Math.min(k, probs.length);
+		Comparator<ScoredClass> worstFirst = Comparator
+				.comparingDouble(ScoredClass::score)
+				.thenComparing(Comparator.comparingInt(ScoredClass::index).reversed());
+		PriorityQueue<ScoredClass> selected = new PriorityQueue<>(n, worstFirst);
+		for (int index = 0; index < probs.length; index++) {
+			ScoredClass candidate = new ScoredClass(index, probs[index]);
+			if (selected.size() < n) {
+				selected.add(candidate);
+			} else if (worstFirst.compare(candidate, selected.peek()) > 0) {
+				selected.poll();
+				selected.add(candidate);
+			}
+		}
 
-        int n = Math.min(k, idx.size());
+		List<ScoredClass> ranked = new ArrayList<>(selected);
+		ranked.sort(Comparator.comparingDouble(ScoredClass::score).reversed()
+				.thenComparingInt(ScoredClass::index));
         List<ClassScore> out = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            int ci = idx.get(i).getKey();
-            float p = idx.get(i).getValue();
+		for (ScoredClass scored : ranked) {
+			int ci = scored.index();
+			float p = scored.score();
             String name = (labels != null && ci < labels.size()) ? labels.get(ci) : ("class_" + ci);
             out.add(new ClassScore(name, p));
         }
-        return out;
+		return List.copyOf(out);
     }
+
+	private record ScoredClass(int index, float score) { }
 
     /**
      * Flatten common ONNX Runtime output shapes into a float[]:
