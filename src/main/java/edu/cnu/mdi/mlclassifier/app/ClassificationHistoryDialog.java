@@ -12,6 +12,7 @@ import java.util.List;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
@@ -43,14 +44,20 @@ final class ClassificationHistoryDialog extends JDialog {
 		JButton close = new JButton("Close");
 		close.setFont(Fonts.defaultFont);
 		close.addActionListener(event -> dispose());
+		JLabel confidenceNote = new JLabel("Predicted probability is model confidence, "
+				+ "not guaranteed correctness or calibrated accuracy.");
+		confidenceNote.setFont(Fonts.mediumItalicFont);
 		JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
 		buttons.add(close);
+		JPanel footer = new JPanel(new BorderLayout());
+		footer.add(confidenceNote, BorderLayout.CENTER);
+		footer.add(buttons, BorderLayout.EAST);
 
 		JPanel content = new JPanel(new BorderLayout(0, DIALOG_MARGIN));
 		content.setBorder(new EmptyBorder(DIALOG_MARGIN, DIALOG_MARGIN,
 				DIALOG_MARGIN, DIALOG_MARGIN));
 		content.add(scrollPane, BorderLayout.CENTER);
-		content.add(buttons, BorderLayout.SOUTH);
+		content.add(footer, BorderLayout.SOUTH);
 		setContentPane(content);
 		pack();
 		setLocationRelativeTo(parent);

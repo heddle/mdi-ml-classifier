@@ -51,6 +51,11 @@ confidence, inference time, uncertainty, model size, and normalization.
 The latest run can be copied as text, and the complete history can be saved as
 CSV with one row per ranked class.
 
+Predicted probability is presented as model confidence, not as guaranteed
+correctness or calibrated real-world accuracy. **Model > Find Models Online…**
+opens the ONNX Model Zoo when desktop browsing is supported. The platform menu
+shortcut opens an image; adding Shift opens a model.
+
 ## Obtaining models
 
 The historical ONNX Model Zoo is now preserved rather than actively updated,

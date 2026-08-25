@@ -3,9 +3,13 @@ package edu.cnu.mdi.mlclassifier.view;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.HeadlessException;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
+import java.awt.event.KeyEvent;
+import java.awt.event.InputEvent;
 import java.awt.geom.Point2D.Double;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -31,6 +35,7 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 
 import edu.cnu.mdi.container.BaseContainer;
@@ -82,6 +87,7 @@ public class ImageClassifierView extends BaseView {
 	private JMenu recentImagesMenu;
 	private Preferences resultPreferences;
 	private int topK;
+	private String activeModelName = "model";
 
 	// current image
 	private BufferedImage currentImage;
@@ -197,6 +203,20 @@ public class ImageClassifierView extends BaseView {
 		return currentImagePath;
 	}
 
+	/** Set the short model name used in status messages. */
+	public void setActiveModelName(String name) {
+		activeModelName = name == null || name.isBlank() ? "model" : name;
+	}
+
+	/** Return the platform menu-shortcut mask, with a headless-test fallback. */
+	public static int menuShortcutMask() {
+		try {
+			return Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+		} catch (HeadlessException exception) {
+			return InputEvent.CTRL_DOWN_MASK;
+		}
+	}
+
 	/**
 	 * Set the requested number of results. An image already on display is
 	 * reclassified immediately.
@@ -269,7 +289,7 @@ public class ImageClassifierView extends BaseView {
 		this.currentImagePath = sourcePath;
 		currentImage = img;
 		currentResults = null;
-		setStatusText("Classifying image (top " + topK + ")...");
+		setStatusText("Classifying with " + activeModelName + " (top " + topK + ")...");
 
 		classificationFuture = classifier.classifyAsync(img, topK);
 		classificationFuture.whenComplete((results, err) -> {
@@ -288,7 +308,7 @@ public class ImageClassifierView extends BaseView {
 						return;
 					}
 
-					setStatusText("Classification complete.");
+					setStatusText("Classification complete using " + activeModelName + ".");
 					currentResults = List.copyOf(results);
 					if (classificationResultConsumer != null) {
 						classificationResultConsumer.accept(currentResults);
@@ -402,6 +422,8 @@ public class ImageClassifierView extends BaseView {
 
 		JMenu imageMenu = new JMenu("Image");
 		JMenuItem openItem = new JMenuItem("Open Image…");
+		openItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O,
+				menuShortcutMask()));
 		openItem.addActionListener(event -> chooseImage());
 		imageMenu.add(openItem);
 		recentImagesMenu = new JMenu("Recent Images");

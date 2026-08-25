@@ -1,8 +1,12 @@
 package edu.cnu.mdi.mlclassifier.app;
 
+import java.awt.Desktop;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -20,6 +24,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.SwingUtilities;
+import javax.swing.KeyStroke;
 
 import ai.onnxruntime.OrtException;
 import edu.cnu.mdi.app.BaseMDIApplication;
@@ -67,6 +72,7 @@ public class ClassifierApp extends BaseMDIApplication {
 
 	private static final FileType ONNX_FILE_TYPE = FileType.of("ONNX models", "onnx");
 	private static final FileType LABEL_FILE_TYPE = FileType.of("Label files", "txt", "labels");
+	private static final URI MODEL_ZOO_URI = URI.create("https://huggingface.co/onnxmodelzoo");
 	/**
 	 * Constructor.
 	 *
@@ -137,6 +143,9 @@ public class ClassifierApp extends BaseMDIApplication {
 
 		JMenu modelMenu = new JMenu("Model");
 		JMenuItem openModel = new JMenuItem("Open ONNX Model…");
+		openModel.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O,
+				ImageClassifierView.menuShortcutMask()
+						| InputEvent.SHIFT_DOWN_MASK));
 		openModel.addActionListener(event -> chooseModel());
 		modelMenu.add(openModel);
 
@@ -173,6 +182,9 @@ public class ClassifierApp extends BaseMDIApplication {
 		modelInfoItem.setEnabled(false);
 		modelInfoItem.addActionListener(event -> showModelInformation());
 		modelMenu.add(modelInfoItem);
+		JMenuItem findModels = new JMenuItem("Find Models Online…");
+		findModels.addActionListener(event -> openModelZoo());
+		modelMenu.add(findModels);
 		BaseView.applyFocusFix(modelMenu, imageView);
 		imageView.getJMenuBar().add(modelMenu);
 	}
@@ -258,6 +270,7 @@ public class ClassifierApp extends BaseMDIApplication {
 			labelsPath = normalizedLabels;
 			normalization = requestedNormalization;
 			modelProfiles.save(new ModelProfile(modelPath, labelsPath, normalization));
+			imageView.setActiveModelName(modelPath.getFileName().toString());
 			imageView.setClassifier(loaded);
 			recentModels.add(normalizedModel.toFile());
 			recentModelsHelper.rebuild(recentModelsMenu);
@@ -320,6 +333,21 @@ public class ClassifierApp extends BaseMDIApplication {
 				"Current Model Information", JOptionPane.INFORMATION_MESSAGE);
 	}
 
+	private void openModelZoo() {
+		try {
+			if (!Desktop.isDesktopSupported()
+					|| !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+				throw new UnsupportedOperationException("Opening a browser is not supported on this desktop.");
+			}
+			Desktop.getDesktop().browse(MODEL_ZOO_URI);
+		} catch (IOException | RuntimeException exception) {
+			Log.getInstance().warning("Unable to open the model site: " + exception.getMessage());
+			JOptionPane.showMessageDialog(imageView,
+					"Open this address in a browser:\n" + MODEL_ZOO_URI,
+					"ONNX Model Zoo", JOptionPane.INFORMATION_MESSAGE);
+		}
+	}
+
 	private void installHistoryActions() {
 		JMenu resultsMenu = findViewMenu("Results");
 		if (resultsMenu == null) {
@@ -337,8 +365,14 @@ public class ClassifierApp extends BaseMDIApplication {
 		resultsMenu.add(saveHistoryItem);
 		clearHistoryItem = new JMenuItem("Clear History");
 		clearHistoryItem.addActionListener(event -> {
-			classificationHistory.clear();
-			updateHistoryActions();
+			int response = JOptionPane.showConfirmDialog(imageView,
+					"Clear all classification comparison history?",
+					"Clear Comparison History", JOptionPane.OK_CANCEL_OPTION,
+					JOptionPane.QUESTION_MESSAGE);
+			if (response == JOptionPane.OK_OPTION) {
+				classificationHistory.clear();
+				updateHistoryActions();
+			}
 		});
 		resultsMenu.add(clearHistoryItem);
 		updateHistoryActions();
@@ -383,9 +417,16 @@ public class ClassifierApp extends BaseMDIApplication {
 	}
 
 	private void copyLatestResult() {
-		Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
-				new StringSelection(classificationHistory.latestAsText()), null);
-		imageView.setStatusText("Latest classification copied to the clipboard.");
+		try {
+			Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+					new StringSelection(classificationHistory.latestAsText()), null);
+			imageView.setStatusText("Latest classification copied to the clipboard.");
+		} catch (RuntimeException exception) {
+			Log.getInstance().warning("Unable to copy classification results: " + exception.getMessage());
+			JOptionPane.showMessageDialog(imageView,
+					"The clipboard is unavailable.\n" + exception.getMessage(),
+					"Copy Results Failed", JOptionPane.ERROR_MESSAGE);
+		}
 	}
 
 	private void saveHistory() {

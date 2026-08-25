@@ -35,6 +35,6 @@ public class ImageClassifierViewInfo extends AbstractViewInfo {
 
     @Override
     public String getTechnicalNotes() {
-        return "The source is center-cropped to the model aspect ratio, resized, normalized, and arranged as NCHW or NHWC according to ONNX metadata. Inference runs on a dedicated worker so the Swing event-dispatch thread remains responsive. Outputs already forming a probability distribution are preserved; other finite outputs are converted with numerically stable softmax.";
+        return "The source is center-cropped to the model aspect ratio, resized, normalized, and arranged as NCHW or NHWC according to ONNX metadata. Inference runs on a dedicated worker so the Swing event-dispatch thread remains responsive. Outputs already forming a probability distribution are preserved; other finite outputs are converted with numerically stable softmax. Predicted probability expresses model confidence; it does not guarantee correctness or calibrated real-world accuracy.";
     }
 }
