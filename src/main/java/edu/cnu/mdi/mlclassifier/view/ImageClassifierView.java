@@ -2,7 +2,6 @@ package edu.cnu.mdi.mlclassifier.view;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -32,6 +31,7 @@ import edu.cnu.mdi.graphics.drawable.IDrawable;
 import edu.cnu.mdi.log.Log;
 import edu.cnu.mdi.mlclassifier.model.ClassScore;
 import edu.cnu.mdi.mlclassifier.onnx.OnnxImageClassifier;
+import edu.cnu.mdi.swing.SwingSizingUtils;
 import edu.cnu.mdi.transfer.FileDropHandler;
 import edu.cnu.mdi.transfer.ImageFilters;
 import edu.cnu.mdi.ui.fonts.Fonts;
@@ -128,8 +128,8 @@ public class ImageClassifierView extends BaseView {
 	// Add the feedback pane to the east side.
 	private void addFeedback() {
 		FeedbackPane fbp = initFeedback(Color.cyan, Color.black, 11);
-		Dimension feedbackPref = fbp.getPreferredSize();
-		fbp.setPreferredSize(new Dimension(SIDE_PANEL_WIDTH, feedbackPref.height));
+		fbp.setPreferredSize(SwingSizingUtils.preferredSizeAtLeast(
+				fbp, SIDE_PANEL_WIDTH, 1));
 		add(fbp, BorderLayout.EAST);
 		statusLabel.setBorder(BorderFactory.createLineBorder(Color.lightGray));
 	}
