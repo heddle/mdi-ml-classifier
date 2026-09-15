@@ -9,7 +9,7 @@ sPlot, and ONNX Runtime in an end-to-end image-classification workflow.
 - Maven
 - An ONNX image-classification model
 
-MDI 1.2.2 and ONNX Runtime 1.23.2 are Maven dependencies and are obtained
+MDI 1.2.3 and ONNX Runtime 1.23.2 are Maven dependencies and are obtained
 automatically when the project is built. A separate local installation of MDI
 is not required.
 
