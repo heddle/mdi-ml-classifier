@@ -4,14 +4,12 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>edu.cnu</groupId>
 	<artifactId>mdi-ml-classifier</artifactId>
-	<version>1.0.1</version>
+	<version>1.0.2</version>
 	<name>MDI Classifier</name>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<maven.compiler.source>17</maven.compiler.source>
-		<maven.compiler.target>17</maven.compiler.target>
-
+		<maven.compiler.release>17</maven.compiler.release>
 		<!-- Centralized JUnit version -->
 		<junit.version>5.10.2</junit.version>
 
@@ -21,11 +19,11 @@
 
 
 	<dependencies>
-		
+
 		<dependency>
 			<groupId>io.github.heddle</groupId>
 			<artifactId>mdi</artifactId>
-			<version>1.2.3</version>
+			<version>1.2.4</version>
 		</dependency>
 
 		<dependency>
